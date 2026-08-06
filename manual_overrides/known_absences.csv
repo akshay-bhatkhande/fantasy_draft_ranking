@@ -2,4 +2,10 @@
 # Subtracted directly in STEP 3c, on top of the probabilistic historical Injury Risk bucket.
 # Leave only this header if there are none. Refresh by asking Cursor's agent to research
 # current news, or edit by hand.
+#
+# Only unambiguous, already-announced absences go here. Genuinely uncertain cases (a player on
+# the PUP list who beat writers expect back for Week 1) are left to the Camp-Buzz Multiplier
+# instead, because inventing a games number for them would be a guess.
 player,games_missed,reason,source,date
+Ricky Pearsall,17,Season-ending PCL surgery,"John Lynch presser via Roto Street Journal / Yahoo Sports camp injury report",2026-08-03
+Chris Brazzell,17,Knee - out for season,"Yahoo Sports NFL training camp injury report",2026-08-05
