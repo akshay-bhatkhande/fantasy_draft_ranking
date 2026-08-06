@@ -119,17 +119,34 @@ def detect_tiers_largest_gap(
     local_window: int | None = None,
     min_size: int | None = None,
     max_tiers: int | None = None,
+    max_width: float | None = None,
+    max_size: int | None = None,
 ) -> pd.Series:
     """Tier breaks at natural gaps in the sorted VORP list.
 
-    A break is declared where the gap between consecutive players is meaningfully larger than
-    the LOCAL average gap, so tier sizes follow the actual shape of the talent distribution
-    rather than fixed buckets like "every 12 players".
+    Two independent triggers, because neither alone is sufficient:
+
+    1. A GAP break, where the gap to the next player is meaningfully larger than the LOCAL
+       average gap. This is the adaptive rule that makes tier sizes follow the real shape of
+       the distribution rather than fixed buckets like "every 12 players". It respects
+       min_size, so ordinary noise cannot fragment a tier.
+
+    2. A FORCED break, when the running tier has grown too wide in VORP or too long in
+       players. The relative rule cannot distinguish "uniform but very wide" from "uniform and
+       tight": near the top of the board every gap is large, so nothing clears the
+       local-average test and players pile into one enormous tier. A tier spanning 56 VORP is
+       not a tier, since its best member is worth 56 more points than its worst. Forced breaks
+       deliberately ignore min_size.
+
+    max_tiers is normally None (unlimited). A finite ceiling TRUNCATES: once reached, every
+    remaining player is dumped into the final tier no matter what the values do.
     """
     sensitivity = W.TIER_GAP_SENSITIVITY if sensitivity is None else sensitivity
     local_window = W.TIER_LOCAL_WINDOW if local_window is None else local_window
     min_size = W.TIER_MIN_SIZE if min_size is None else min_size
     max_tiers = W.TIER_MAX_COUNT if max_tiers is None else max_tiers
+    max_width = W.TIER_MAX_WIDTH_VORP if max_width is None else max_width
+    max_size = W.TIER_MAX_SIZE if max_size is None else max_size
 
     vals = pd.to_numeric(values, errors="coerce")
     order = vals.sort_values(ascending=False)
@@ -142,26 +159,49 @@ def detect_tiers_largest_gap(
     tiers = np.ones(len(arr), dtype=int)
     current = 1
     since_break = 1
+    tier_start = 0
 
     for i, gap in enumerate(gaps):
         lo = max(0, i - local_window)
         hi = min(len(gaps), i + local_window + 1)
         local = gaps[lo:hi]
         local_mean = float(np.mean(local)) if len(local) else 0.0
-        is_break = (
+
+        room_for_another_tier = max_tiers is None or current < max_tiers
+
+        gap_break = (
             local_mean > 0
             and gap > sensitivity * local_mean
             and since_break >= min_size
-            and current < max_tiers
+            and room_for_another_tier
         )
-        if is_break:
+        # Width measured as though the next player were to join the current tier.
+        prospective_width = arr[tier_start] - arr[i + 1]
+        forced_break = room_for_another_tier and (
+            (max_width is not None and prospective_width > max_width)
+            or (max_size is not None and since_break >= max_size)
+        )
+
+        if gap_break or forced_break:
             current += 1
             since_break = 1
+            tier_start = i + 1
         else:
             since_break += 1
         tiers[i + 1] = current
 
-    return pd.Series(tiers, index=order.index).reindex(values.index).astype("Int64")
+    assigned = pd.Series(tiers, index=order.index)
+
+    # Players with identical VORP must land in the same tier -- equal value, equal tier. Deep in
+    # the board hundreds of players share an exact projection, and a tie group can straddle a
+    # break, so without this the tier number depends on the arbitrary order ties came out of the
+    # sort. Collapsing each tie group to its best (lowest) tier makes the column deterministic.
+    # A tie group larger than max_size will exceed it, which is correct: identical values cannot
+    # meaningfully be split.
+    if order.duplicated().any():
+        assigned = assigned.groupby(order.values).transform("min")
+
+    return assigned.reindex(values.index).astype("Int64")
 
 
 def detect_tiers_kmeans(values: pd.Series, max_clusters: int | None = None) -> pd.Series:

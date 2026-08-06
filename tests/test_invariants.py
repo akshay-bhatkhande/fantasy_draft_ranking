@@ -108,6 +108,66 @@ def test_tier_one_contains_the_best_players():
     assert tiers.dropna().is_monotonic_increasing
 
 
+def test_tiers_keep_forming_deep_in_the_board():
+    """No truncation bucket.
+
+    A finite tier ceiling used to dump everyone past the last allowed break into one tier -- on
+    the real board that was 798 players in a single 212-VORP "tier". Tiers must keep forming all
+    the way down.
+    """
+    values = pd.Series(np.linspace(120, -220, 900))
+    tiers = detect_tiers_largest_gap(values)
+
+    # A large tier is only acceptable when its members are genuinely interchangeable, i.e. it
+    # spans almost no value. Truncation instead produces a tier that is both large AND wide.
+    # (Tie-collapse can merge two near-identical values into one large tier, which is fine.)
+    sizes = tiers.value_counts()
+    for tier_id, size in sizes.items():
+        span = values[tiers == tier_id]
+        width = span.max() - span.min()
+        assert width <= W.TIER_MAX_WIDTH_VORP + 1e-9, (
+            f"tier {tier_id} spans {width:.1f} VORP across {size} players - looks like a truncation bucket"
+        )
+    # The bottom of the board must not share a tier with the middle.
+    assert tiers.iloc[-1] != tiers.iloc[len(tiers) // 2]
+    assert tiers.nunique() > 20
+
+
+def test_no_tier_spans_an_implausible_value_range():
+    """A tier is a group you can treat as interchangeable, so its span is bounded.
+
+    The relative gap rule alone cannot split a region where every gap is large, which produced
+    a 25-player tier spanning 56 VORP near the top of the board.
+    """
+    # Uniform, widely spaced values: no gap is locally unusual, so only the width/size caps
+    # can break this up.
+    values = pd.Series(np.arange(100, 0, -2.0))
+    tiers = detect_tiers_largest_gap(values)
+    assert tiers.nunique() > 1, "a uniformly spaced run must still be split into tiers"
+    for tier_id in tiers.unique():
+        span = values[tiers == tier_id]
+        assert span.max() - span.min() <= W.TIER_MAX_WIDTH_VORP + 1e-9
+        assert len(span) <= W.TIER_MAX_SIZE
+
+
+def test_tied_values_always_share_a_tier():
+    """Equal VORP must mean equal tier, regardless of how ties fell out of the sort."""
+    values = pd.Series([50.0, 40.0, 30.0] + [7.5] * 40 + [1.0, 0.5])
+    tiers = detect_tiers_largest_gap(values)
+    tied = tiers[values == 7.5]
+    assert tied.nunique() == 1, "players with identical VORP were split across tiers"
+
+
+def test_tiering_is_deterministic_regardless_of_input_order():
+    """Row order must not influence the tier column."""
+    rng = np.random.default_rng(11)
+    values = pd.Series(np.sort(rng.normal(0, 30, 400))[::-1])
+    first = detect_tiers_largest_gap(values)
+    shuffled = values.sample(frac=1, random_state=5)
+    second = detect_tiers_largest_gap(shuffled).reindex(values.index)
+    pd.testing.assert_series_equal(first, second)
+
+
 def test_volatility_never_changes_rank():
     """Consistency is displayed alongside the board and must not feed VORP or the ranking."""
     df = compute_vorp(_board(), LEAGUE)

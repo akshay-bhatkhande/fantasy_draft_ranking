@@ -209,8 +209,30 @@ TIER_METHOD = "largest_gap"  # "largest_gap" | "kmeans"
 # A gap starts a new tier when it exceeds this multiple of the local average gap.
 TIER_GAP_SENSITIVITY = 1.8
 TIER_LOCAL_WINDOW = 8
+# Minimum players between two GAP-driven breaks, so ordinary noise cannot fragment a tier.
+# The width/size limits below deliberately override this -- see below.
 TIER_MIN_SIZE = 3
-TIER_MAX_COUNT = 14
+
+# Hard ceiling on the number of tiers. None = unlimited, which is the sensible default:
+# a fixed ceiling silently dumps everyone past the last allowed break into one bucket. With a
+# 914-player board there are ~146 real breakpoints, so a ceiling of 14 discarded 128 of them
+# and produced a single 798-player "tier 14" spanning 212 VORP.
+TIER_MAX_COUNT: int | None = None
+
+# Absolute limits that force a break even when no gap is locally unusual.
+#
+# The relative gap rule alone cannot tell "uniform but very wide" from "uniform and tight".
+# Near the top of the board every gap is large, so nothing clears the local-average test and
+# 25 players were landing in one tier spanning 56 VORP -- which is not a tier in any useful
+# sense, since its best player was worth 56 more points than its worst. These caps mean a tier
+# is always a group you could genuinely treat as interchangeable.
+#
+# 8 VORP across a 17-game season is about half a point per game.
+TIER_MAX_WIDTH_VORP: float | None = 8.0
+TIER_MAX_SIZE: int | None = 10
+
+# Only used when TIER_METHOD == "kmeans". k-means picks its own cluster count by silhouette
+# score, so this is a genuine algorithmic bound rather than a truncation.
 KMEANS_MAX_CLUSTERS = 12
 
 
