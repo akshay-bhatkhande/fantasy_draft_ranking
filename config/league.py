@@ -92,7 +92,19 @@ FLEX_SLOTS = 2
 FLEX_ELIGIBLE = ("RB", "WR", "TE")
 
 # Historical league-wide FLEX usage rates. Feeds STEP 4a's shared-slot allocation.
-FLEX_ALLOCATION = {"RB": 0.60, "WR": 0.30, "TE": 0.10}
+#
+# Read these as a share of the 20 FLEX slots in the league (2 per team x 10 teams). The spec's
+# default put TE at 10%, i.e. TWO tight ends started in FLEX league-wide every week -- which
+# requires two separate teams each rostering a TE good enough to start over their RB/WR depth.
+# On 17-man rosters in a 10-team league that is unrealistic; it takes a McBride-plus-Warren
+# situation, and there is rarely more than one of those. TE is therefore set to 5%, allowing for
+# exactly one such team, with the freed share split between RB and WR in their existing 2:1 ratio.
+#
+# This is not cosmetic. FLEX allocation sets the starter count, which sets which player is the
+# replacement, which sets the baseline every VORP at that position is measured against. Measured
+# directly, the startable-TE gap versus expert consensus moves +15.5 at 5%, +25.2 at 10%,
+# +34.6 at 20% and +44.1 at 30% -- it was the single largest driver of the board's TE tilt.
+FLEX_ALLOCATION = {"RB": 0.633, "WR": 0.317, "TE": 0.05}
 
 BENCH_SLOTS = 7
 

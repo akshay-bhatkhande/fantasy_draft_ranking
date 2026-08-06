@@ -90,13 +90,24 @@ Starter counts, and therefore replacement levels, are **derived from `config/lea
 hardcoded. For this league they compute to:
 
 ```
-QB: (1 x 10) + 0                  = 10 starters -> replacement is QB11
-RB: (2 x 10) + (2 x 10 x 0.60)    = 32 starters -> replacement is RB33
-WR: (2 x 10) + (2 x 10 x 0.30)    = 26 starters -> replacement is WR27
-TE: (1 x 10) + (2 x 10 x 0.10)    = 12 starters -> replacement is TE13
+QB: (1 x 10) + 0                   = 10 starters -> replacement is QB11
+RB: (2 x 10) + (2 x 10 x 0.633)    = 33 starters -> replacement is RB34
+WR: (2 x 10) + (2 x 10 x 0.317)    = 26 starters -> replacement is WR27
+TE: (1 x 10) + (2 x 10 x 0.05)     = 11 starters -> replacement is TE12
 ```
 
 Change the roster or the FLEX allocation and these recalculate automatically.
+
+**On the FLEX split (63.3 / 31.7 / 5).** Read these as shares of the 20 FLEX slots in the league
+(2 per team x 10 teams). The original spec suggested 10% TE, which means *two* tight ends started
+in FLEX league-wide every week -- that needs two separate teams each rostering a TE good enough to
+start over their RB/WR depth, and on 17-man rosters in a 10-team league that essentially doesn't
+happen outside a McBride-plus-Warren situation. TE is set to 5%, allowing exactly one such team.
+
+This dial matters more than it looks, because it sets the starter count, which sets which player
+is the replacement, which sets the baseline every VORP at that position is measured against.
+Measured against expert consensus, the startable-TE gap runs +15.5 at 5%, +25.2 at 10%, +34.6 at
+20% and +44.1 at 30%. If your league genuinely does start two TEs in FLEX, raise it back.
 
 Volatility (floor / median / ceiling / Consistency Score) is computed **in parallel** and shown
 alongside every player, but never enters the chain above and never changes a rank. A boom/bust

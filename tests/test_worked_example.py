@@ -213,11 +213,31 @@ def test_full_step3_chain_and_vorp_match_worked_example():
 
 
 def test_starter_counts_match_worked_example():
-    """STEP 4a: derived from config, giving QB11 / RB33 / WR27 / TE13 as replacements."""
-    counts = starter_counts(LEAGUE)
+    """STEP 4a against the spec's own worked example, which assumed 60/30/10 FLEX usage.
+
+    Pinned to that allocation explicitly rather than to the live config, because FLEX usage is a
+    tunable fact about the league, not a property of the arithmetic. The league now runs TE at 5%
+    (two TE FLEX starts league-wide was unrealistic), so asserting the spec's numbers against
+    whatever is currently configured would make this test fail every time that dial is turned.
+    """
+    spec_example = dataclasses.replace(
+        LEAGUE, flex_allocation={"RB": 0.60, "WR": 0.30, "TE": 0.10}
+    )
+    counts = starter_counts(spec_example)
     assert counts == {"QB": 10, "RB": 32, "WR": 26, "TE": 12}
     replacements = {pos: n + 1 for pos, n in counts.items()}
     assert replacements == {"QB": 11, "RB": 33, "WR": 27, "TE": 13}
+
+
+def test_live_config_starter_counts_follow_from_its_flex_allocation():
+    """Whatever FLEX usage is configured, the counts must be its arithmetic consequence."""
+    counts = starter_counts(LEAGUE)
+    for pos in ("QB", "RB", "WR", "TE"):
+        dedicated = LEAGUE.dedicated_starters.get(pos, 0) * LEAGUE.num_teams
+        flex = LEAGUE.flex_slots * LEAGUE.num_teams * LEAGUE.flex_allocation.get(pos, 0.0)
+        assert counts[pos] == round(dedicated + flex)
+    # One TE FLEX start league-wide at the configured 5%.
+    assert counts["TE"] == 11
 
 
 def test_starter_counts_are_derived_not_hardcoded():
