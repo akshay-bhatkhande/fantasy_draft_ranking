@@ -198,17 +198,31 @@ def compute_opportunity_score(
     weighted = weighted.copy()
     weighted["position"] = weighted["player_id"].map(positions)
 
-    values = pd.Series(np.nan, index=weighted.index, dtype=float)
-    details = pd.Series("", index=weighted.index, dtype=object)
+    values, details = fold_opportunity(weighted, weighted["position"])
+    weighted["opportunity_value"] = values
+    weighted["opportunity_detail"] = details
+    return weighted
+
+
+def fold_opportunity(
+    frame: pd.DataFrame, position_series: pd.Series
+) -> tuple[pd.Series, pd.Series]:
+    """Fold the per-position sub-components into ONE opportunity value, plus an audit string.
+
+    Shared by the live scoring path and by the historical role-prior derivation, so a prior is
+    always expressed in exactly the same units as the value it will be blended with.
+    """
+    values = pd.Series(np.nan, index=frame.index, dtype=float)
+    details = pd.Series("", index=frame.index, dtype=object)
 
     for pos, sub_weights in W.OPPORTUNITY_SUB_WEIGHTS.items():
-        mask = weighted["position"] == pos
+        mask = position_series == pos
         if not mask.any():
             continue
-        usable = {k: v for k, v in sub_weights.items() if k in weighted.columns}
+        usable = {k: v for k, v in sub_weights.items() if k in frame.columns}
         if not usable:
             continue
-        block = weighted.loc[mask, list(usable)].apply(pd.to_numeric, errors="coerce")
+        block = frame.loc[mask, list(usable)].apply(pd.to_numeric, errors="coerce")
         w_series = pd.Series(usable, dtype=float)
         # Renormalise over components that actually exist for each player, so a missing
         # component means "average of what we have", not "treated as zero opportunity".
@@ -220,6 +234,132 @@ def compute_opportunity_score(
             lambda r: ", ".join(f"{c}={r[c]:.3f}" for c in block.columns if pd.notna(r[c])), axis=1
         )
 
-    weighted["opportunity_value"] = values
-    weighted["opportunity_detail"] = details
-    return weighted
+    return values, details
+
+
+# --------------------------------------------------------------------------------------
+# Projected-role blending
+# --------------------------------------------------------------------------------------
+
+
+def derive_role_opportunity_priors(
+    depth_history: pd.DataFrame,
+    pbp_history: pd.DataFrame,
+    weekly_history: pd.DataFrame,
+) -> dict[tuple[str, int], float]:
+    """What opportunity share does a given depth-chart slot historically earn?
+
+    Built by joining each season's opening depth chart to that season's realised opportunity
+    value, so the answer is empirical rather than assumed. Monotonicity is enforced across
+    ranks: a lower slot cannot be expected to out-earn a higher one, which corrects small-sample
+    inversions (a 16-player QB3 bucket came out above QB2 before this).
+    """
+    if depth_history.empty or pbp_history.empty:
+        return {}
+
+    frames = []
+    for season, dc_season in depth_history.groupby("season"):
+        pbp_season = pbp_history[pbp_history["season"] == season]
+        weekly_season = weekly_history[weekly_history["season"] == season]
+        if pbp_season.empty:
+            continue
+        per_season = compute_opportunity_inputs(pbp_season, weekly_season)
+        if per_season.empty:
+            continue
+        # Positions come from the depth chart itself, so the prior does not depend on a
+        # current-season roster map that would not cover players from past seasons.
+        pos_map = dc_season.drop_duplicates(subset=["player_id"]).set_index("player_id")["position"]
+        per_season = per_season.copy()
+        per_season["position"] = per_season["player_id"].map(pos_map)
+        per_season = per_season[per_season["position"].notna()]
+        if per_season.empty:
+            continue
+        vals, _ = fold_opportunity(per_season, per_season["position"])
+        per_season["opportunity_value"] = vals
+        merged = dc_season[["player_id", "position", "depth_chart_rank"]].merge(
+            per_season[["player_id", "opportunity_value"]], on="player_id", how="inner"
+        )
+        frames.append(merged)
+
+    if not frames:
+        return {}
+    allm = pd.concat(frames, ignore_index=True)
+    allm = allm[allm["opportunity_value"].notna()]
+
+    priors: dict[tuple[str, int], float] = {}
+    for pos in ("QB", "RB", "WR", "TE"):
+        sub = allm[allm["position"] == pos]
+        running = None
+        for rank in range(1, W.ROLE_PRIOR_MAX_RANK + 1):
+            at_rank = sub[sub["depth_chart_rank"] == rank]["opportunity_value"]
+            if len(at_rank) < W.ROLE_PRIOR_MIN_SAMPLE:
+                continue
+            value = float(at_rank.median())
+            # Enforce non-increasing expectation as you go down the depth chart.
+            if running is not None:
+                value = min(value, running)
+            running = value
+            priors[(pos, rank)] = value
+    return priors
+
+
+def blend_role_expectation(
+    opportunity_value: pd.Series,
+    positions: pd.Series,
+    depth_chart_rank: pd.Series,
+    snap_share: pd.Series,
+    priors: dict[tuple[str, int], float],
+    evidence_k: float | None = None,
+) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Blend historical opportunity with what the player's CURRENT depth-chart slot earns.
+
+    The composite is otherwise ~65% backward-looking, while a player's current role entered only
+    as one of seven inputs in a 10%-weighted component -- roughly 1.4%. So a back promoted to
+    RB1 was still priced as the backup he used to be, and a backup who filled in for an injured
+    starter was priced as a starter.
+
+    Weighting is by EVIDENCE, not by rank: w_hist = snap_share / (snap_share + k). A player with
+    a full starter's workload behind him is trusted on his own record; a player with a 20% snap
+    share has a history that says little about how a starting role would look, so he is pulled
+    toward the empirical prior for the slot he now occupies. That cuts both ways by design.
+
+    Returns (blended value, weight given to history, audit note).
+    """
+    evidence_k = W.ROLE_BLEND_EVIDENCE_K if evidence_k is None else evidence_k
+
+    hist = pd.to_numeric(opportunity_value, errors="coerce")
+    rank = pd.to_numeric(depth_chart_rank, errors="coerce")
+    evidence = pd.to_numeric(snap_share, errors="coerce").clip(lower=0.0)
+
+    prior = pd.Series(
+        [priors.get((p, int(r))) if pd.notna(r) and pd.notna(p) else None for p, r in zip(positions, rank)],
+        index=hist.index,
+        dtype=float,
+    )
+
+    w_hist = evidence / (evidence + evidence_k)
+    w_hist = w_hist.where(evidence.notna(), 0.0)
+    # With no prior available there is nothing to blend toward.
+    w_hist = w_hist.where(prior.notna(), 1.0)
+    # With no history at all, lean entirely on the prior.
+    w_hist = w_hist.where(hist.notna(), 0.0)
+
+    blended = w_hist * hist.fillna(0.0) + (1.0 - w_hist) * prior.fillna(0.0)
+    blended = blended.where(hist.notna() | prior.notna())
+
+    if W.ROLE_BLEND_DIRECTION == "up_only":
+        # Never drag a player below his own measured record. See the config note: a player with a
+        # real snap share has better evidence about himself than a rank-average prior does.
+        blended = blended.where(hist.isna() | (blended >= hist), hist)
+
+    note = pd.Series("", index=hist.index, dtype=object)
+    moved = blended.notna() & hist.notna() & (blended - hist).abs().gt(0.02)
+    for idx in hist.index[moved]:
+        direction = "up" if blended.at[idx] > hist.at[idx] else "down"
+        note.at[idx] = (
+            f"Opportunity adjusted {direction} from {hist.at[idx]:.3f} to {blended.at[idx]:.3f}: "
+            f"depth chart lists him {positions.at[idx]}{int(rank.at[idx])} (slot typically earns "
+            f"{prior.at[idx]:.3f}) and his own snap share of {evidence.at[idx]:.2f} carries "
+            f"{w_hist.at[idx]:.0%} of the weight"
+        )
+    return blended, w_hist, note

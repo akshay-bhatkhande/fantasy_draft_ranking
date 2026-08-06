@@ -68,6 +68,40 @@ MIN_TARGETS_FOR_TD_RATE = 25
 # the real fix; this clip is a backstop so no single component can ever dominate the composite.
 EFFICIENCY_Z_CLIP = 3.0
 
+# --- Projected-role blending into the Opportunity component --------------------------
+# The composite is otherwise ~65% backward-looking (40% PPG + 25% opportunity), while a
+# player's CURRENT role entered only as depth-chart competition: one of seven equally-weighted
+# inputs inside a 10% component, so about 1.4% of the composite. That left the model unable to
+# price a role change -- Bhayshul Tuten opened 2026 as Jacksonville's RB1 but was still ranked
+# on his 2025 backup usage, 88 spots below consensus.
+#
+# So historical opportunity is blended with what the player's current depth-chart slot
+# empirically earns, weighted by EVIDENCE rather than by rank:
+#     w_history = snap_share / (snap_share + ROLE_BLEND_EVIDENCE_K)
+# A full-workload starter is trusted on his own record; a 20%-snap backup is pulled toward the
+# prior for the slot he now occupies. This deliberately cuts both ways: it also pulls DOWN a
+# backup whose per-game share was inflated by filling in for an injured starter.
+# At the default k, a snap share of 0.35 splits the weight evenly.
+ROLE_BLEND_EVIDENCE_K = 0.35
+
+# Which direction the blend is allowed to move a player.
+#   "up_only" -- only raise opportunity toward the prior, when the depth chart says a player now
+#                holds a bigger role than his history reflects. This is the asymmetry the data
+#                supports: history genuinely CANNOT show a role a player never had, so the
+#                upward correction fills a real blind spot. Moving players DOWN toward a
+#                rank-based prior is different -- a back with a measured 0.33 share and a 41%
+#                snap share has real evidence about himself, and a crude "all RB2s earn 0.204"
+#                prior is worse information than his own record. Measured symmetrically the
+#                blend was a wash against consensus (mean |ECR delta| 61.1 -> 60.0); upward-only
+#                keeps the gains without the offsetting damage.
+#   "both"    -- symmetric blend in both directions.
+ROLE_BLEND_DIRECTION = "up_only"
+# Seasons of opening depth charts used to derive the priors. Uses the pre-2025 schema, which
+# publishes a weekly depth_team rank; 2025 switched to timestamped snapshots.
+ROLE_PRIOR_SEASONS = (2023, 2024)
+ROLE_PRIOR_MIN_SAMPLE = 5
+ROLE_PRIOR_MAX_RANK = 4
+
 # --- Situational Context Score: equal-weighted average of these z-scores -------------
 SITUATIONAL_COMPONENTS: tuple[str, ...] = (
     "oline_quality",            # esp. relevant for RBs

@@ -237,6 +237,51 @@ def depth_charts(season: int, log: SourceLog | None = None) -> pd.DataFrame:
     return df[df["dt"] == latest].copy()
 
 
+def depth_charts_opening(seasons, log: SourceLog | None = None) -> pd.DataFrame:
+    """Week 1 depth charts for completed seasons, normalised to player_id/position/rank.
+
+    Separate from depth_charts() because nflverse changed this dataset's schema: 2024 and earlier
+    publish a weekly row per player with a `depth_team` rank, while 2025 onward publish
+    timestamped snapshots with `pos_rank`. Only the older schema is used here -- deriving a
+    structural prior for "what a depth-chart slot earns" does not need the newest season, and the
+    older format gives a clean opening-week view.
+    """
+    seasons = clamp_stat_seasons(seasons)
+    if not seasons:
+        return pd.DataFrame(columns=["season", "player_id", "position", "depth_chart_rank"])
+
+    frames = []
+    for season in seasons:
+        df = safe_load(
+            "nflverse opening depth charts",
+            f"load_depth_charts(seasons=[{season}])",
+            lambda s=season: nfl.load_depth_charts(seasons=[s]),
+            log=log,
+        )
+        df = _pd(df)
+        if df.empty or "depth_team" not in df.columns:
+            continue  # newer snapshot schema; skip for prior derivation
+        sub = df.copy()
+        sub["week"] = pd.to_numeric(sub.get("week"), errors="coerce")
+        if "game_type" in sub.columns:
+            sub = sub[sub["game_type"] == "REG"]
+        sub = sub[sub["week"] == 1]
+        sub["depth_chart_rank"] = pd.to_numeric(sub["depth_team"], errors="coerce")
+        sub = sub[sub["position"].isin(["QB", "RB", "WR", "TE"])]
+        sub = sub.dropna(subset=["gsis_id", "depth_chart_rank"])
+        # A player can appear at more than one slot; keep his best (lowest) rank.
+        sub = sub.sort_values("depth_chart_rank").drop_duplicates(subset=["gsis_id"])
+        frames.append(
+            sub[["season", "gsis_id", "position", "depth_chart_rank"]].rename(
+                columns={"gsis_id": "player_id"}
+            )
+        )
+
+    if not frames:
+        return pd.DataFrame(columns=["season", "player_id", "position", "depth_chart_rank"])
+    return pd.concat(frames, ignore_index=True)
+
+
 def schedules(seasons, log: SourceLog | None = None) -> pd.DataFrame:
     """Game schedule including Vegas spread_line / total_line, roof and coaches.
 

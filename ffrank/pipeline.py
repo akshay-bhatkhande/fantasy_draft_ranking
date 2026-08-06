@@ -29,6 +29,7 @@ from .data.cache import SourceLog
 from .features import curves as C
 from .features import kdst, risk, volatility
 from .features.efficiency import compute_efficiency_score
+from .features import opportunity as opportunity_mod
 from .features.opportunity import PBP_COLUMNS, compute_opportunity_score
 from .features.situational import compute_situational
 from .features.weighted_ppg import compute_weighted_ppg, limited_sample_note, season_ppg_table
@@ -167,6 +168,7 @@ def build_rankings(league: LeagueConfig = LEAGUE, log: SourceLog | None = None) 
     df = df.merge(
         opportunity[["player_id", "opportunity_value", "opportunity_detail"]], on="player_id", how="left"
     )
+    df = df.rename(columns={"opportunity_value": "opportunity_value_historical"})
 
     efficiency = compute_efficiency_score(
         weekly, pbp, participation, snaps, adv_rush, adv_rec, ff_opp, positions, pfr_ids, target
@@ -186,6 +188,27 @@ def build_rankings(league: LeagueConfig = LEAGUE, log: SourceLog | None = None) 
         ) if c in sit.columns
     ]
     df = df.merge(sit[sit_cols], on="player_id", how="left")
+
+    # Blend the player's CURRENT depth-chart role into his historical opportunity share, so a
+    # role change is priced rather than ignored. Needs depth_chart_rank (from the target-season
+    # depth chart, merged just above) and snap_share as the evidence weight.
+    role_priors = opportunity_mod.derive_role_opportunity_priors(
+        nv.depth_charts_opening(W.ROLE_PRIOR_SEASONS, log=log), pbp, weekly
+    )
+    depth_rank = (
+        df["depth_chart_rank"] if "depth_chart_rank" in df.columns
+        else pd.Series(np.nan, index=df.index)
+    )
+    blended, w_hist, role_note = opportunity_mod.blend_role_expectation(
+        df["opportunity_value_historical"],
+        df["position"],
+        depth_rank,
+        df["snap_share"],
+        role_priors,
+    )
+    df["opportunity_value"] = blended
+    df["opportunity_history_weight"] = w_hist
+    df["role_blend_note"] = role_note
 
     # ADP joins by normalised name: FFC publishes no stable player id.
     if not adp.empty:

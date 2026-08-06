@@ -15,6 +15,7 @@ from config import weights as W
 from config.league import LEAGUE
 from ffrank.data.nflverse import clamp_stat_seasons, max_stat_season
 from ffrank.data.sleeper import normalize_name
+from ffrank.features.opportunity import blend_role_expectation, derive_role_opportunity_priors
 from ffrank.features.volatility import consistency_scores, same_ppg_volatility_flags
 from ffrank.scoring.step4_vorp import (
     compute_vorp,
@@ -316,6 +317,81 @@ def test_participation_seasons_are_clamped_to_completed_seasons():
     clamped = clamp_stat_seasons(LEAGUE.lookback_seasons)
     assert clamped and max(clamped) <= ceiling
     assert LEAGUE.target_season > ceiling, "the target season is not yet complete, by definition"
+
+
+def _blend_inputs(hist, rank, snap, pos="RB"):
+    idx = range(len(hist))
+    return (
+        pd.Series(hist, index=idx, dtype=float),
+        pd.Series([pos] * len(hist), index=idx),
+        pd.Series(rank, index=idx, dtype=float),
+        pd.Series(snap, index=idx, dtype=float),
+    )
+
+
+def test_role_blend_lifts_a_promoted_player_with_thin_evidence():
+    """A back promoted to RB1 whose history is backup-sized should move toward the RB1 prior."""
+    priors = {("RB", 1): 0.49, ("RB", 2): 0.20}
+    hist, pos, rank, snap = _blend_inputs([0.20], [1], [0.21])
+    blended, w_hist, note = blend_role_expectation(hist, pos, rank, snap, priors)
+    assert blended.iloc[0] > hist.iloc[0], "a promoted player must be lifted toward the RB1 prior"
+    assert blended.iloc[0] < priors[("RB", 1)], "but not all the way; his own record still counts"
+    assert 0.0 < w_hist.iloc[0] < 1.0
+    assert "depth chart" in note.iloc[0]
+
+
+def test_role_blend_barely_moves_an_established_starter():
+    """A full-workload starter is trusted on his own record."""
+    priors = {("RB", 1): 0.49}
+    hist, pos, rank, snap = _blend_inputs([0.57], [1], [0.80])
+    blended, w_hist, _ = blend_role_expectation(hist, pos, rank, snap, priors)
+    assert w_hist.iloc[0] > 0.65, "high snap share must keep most of the weight on history"
+    assert abs(blended.iloc[0] - hist.iloc[0]) < 0.06
+
+
+def test_role_blend_never_drops_a_player_below_his_own_record():
+    """Under the default up_only direction, a measured record acts as a floor.
+
+    A rank-average prior is worse information about a specific player than his own measured
+    share, so the blend must not drag a productive backup down to the average for his slot.
+    """
+    assert W.ROLE_BLEND_DIRECTION == "up_only"
+    priors = {("RB", 2): 0.20}
+    hist, pos, rank, snap = _blend_inputs([0.33], [2], [0.41])
+    blended, _, _ = blend_role_expectation(hist, pos, rank, snap, priors)
+    assert blended.iloc[0] == pytest.approx(hist.iloc[0])
+
+
+def test_role_blend_uses_prior_when_there_is_no_history_at_all():
+    priors = {("RB", 1): 0.49}
+    hist, pos, rank, snap = _blend_inputs([np.nan], [1], [np.nan])
+    blended, w_hist, _ = blend_role_expectation(hist, pos, rank, snap, priors)
+    assert blended.iloc[0] == pytest.approx(0.49)
+    assert w_hist.iloc[0] == pytest.approx(0.0)
+
+
+def test_role_blend_is_a_no_op_without_a_prior():
+    """No prior for the slot means nothing to blend toward, so the value passes through."""
+    hist, pos, rank, snap = _blend_inputs([0.30], [7], [0.50])
+    blended, w_hist, note = blend_role_expectation(hist, pos, rank, snap, {})
+    assert blended.iloc[0] == pytest.approx(0.30)
+    assert w_hist.iloc[0] == pytest.approx(1.0)
+    assert note.iloc[0] == ""
+
+
+def test_role_priors_are_monotonic_down_the_depth_chart():
+    """A lower depth slot can never be expected to out-earn a higher one.
+
+    Enforced because small samples invert: a 16-player QB3 bucket came out above QB2.
+    """
+    depth = pd.DataFrame({
+        "season": [2024] * 8,
+        "player_id": [f"p{i}" for i in range(8)],
+        "position": ["RB"] * 8,
+        "depth_chart_rank": [1, 1, 1, 1, 2, 2, 2, 2],
+    })
+    # Empty pbp -> no priors at all, which must not raise.
+    assert derive_role_opportunity_priors(depth, pd.DataFrame(), pd.DataFrame()) == {}
 
 
 def test_composite_weights_sum_to_one():
