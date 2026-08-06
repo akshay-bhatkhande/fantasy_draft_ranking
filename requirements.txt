@@ -1,0 +1,21 @@
+# Core NFL data (nflverse wrapper, chosen over legacy nfl_data_py per plan decision)
+nflreadpy>=0.1.5
+polars>=1.0
+
+# Data wrangling / numerics
+pandas>=2.2
+numpy>=1.26
+scipy>=1.13
+scikit-learn>=1.5
+
+# Excel export
+XlsxWriter>=3.2
+
+# HTTP for market data (FFC ADP, dynastyprocess CSVs are handled by nflreadpy, Sleeper fallback)
+requests>=2.32
+
+# Parquet engine used by nflreadpy/polars
+pyarrow>=17.0
+
+# Testing
+pytest>=8.0

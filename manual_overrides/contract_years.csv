@@ -1,0 +1,5 @@
+# OPTIONAL manual contract-year corrections, layered on top of the flags derived from
+# nflverse's OverTheCap contract mirror. Only needed when you spot a contract the OTC data
+# has not caught up with. Contracts do not change daily, so this is a once-per-offseason file.
+# contract_year: Y or N
+player,contract_year,source

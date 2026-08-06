@@ -1,0 +1,5 @@
+# Already-announced games missed for the upcoming season (injury / holdout / suspension).
+# Subtracted directly in STEP 3c, on top of the probabilistic historical Injury Risk bucket.
+# Leave only this header if there are none. Refresh by asking Cursor's agent to research
+# current news, or edit by hand.
+player,games_missed,reason,source,date

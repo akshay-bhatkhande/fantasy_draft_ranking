@@ -1,0 +1,12 @@
+{
+  "_readme": [
+    "Camp-Buzz Multiplier input. This is the ONLY place training-camp news enters the pipeline.",
+    "Refresh it by asking Cursor's agent in chat (see README.md); the core script never searches the web itself.",
+    "score: -2..+2. +2 = multiple beat writers reporting a clear role/battle win, +1 = positive but limited,",
+    "0 = no notable camp news, -1/-2 = mirrored negatives. Multiplier is capped at +/-8%.",
+    "Every entry MUST have a source; entries without one are dropped, because unsourced camp adjustments are not allowed.",
+    "Players absent from this file are treated as neutral (0)."
+  ],
+  "last_updated": null,
+  "players": []
+}

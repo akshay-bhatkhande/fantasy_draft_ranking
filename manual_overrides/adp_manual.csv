@@ -1,0 +1,8 @@
+# OPTIONAL multi-platform ADP paste-in.
+# The script's automatic ADP is Fantasy Football Calculator, queried for this exact format
+# (10-team PPR) including per-player stdev. A true blended ADP across Underdog/ESPN/Yahoo/NFC
+# needs paid access or scraping sites whose terms discourage it, so if you want it, paste the
+# numbers here once at setup time. Any of the adp_* columns below may be omitted or left blank;
+# whatever is present is averaged with the FFC number, and the spread across sources is shown
+# as a market-disagreement flag (it never feeds the Composite Z-Score).
+player,adp_underdog,adp_espn,adp_yahoo,adp_nfc
