@@ -24,11 +24,11 @@ from ..scoring import strategy as strat
 from ..scoring.step4_vorp import describe_starter_counts
 from .formatting import (
     KDST_COLUMNS,
-    MAIN_COLUMNS,
     SLOT_EXTRA_COLUMNS,
     Column,
     apply_flag_formatting,
     build_formats,
+    main_columns,
     resolve_format,
 )
 
@@ -186,14 +186,24 @@ def _write_cover(workbook, formats, result, sheet_names: list[str]) -> None:
 
     ws.write(row, 1, "Personal-preference adjustment", formats["subtitle"])
     row += 1
-    ws.merge_range(
-        row, 1, row + 1, 2,
-        f"Players on {league.bias_team} have Final Projected PPG multiplied by "
-        f"{league.bias_team_multiplier:.2f}. This is a personal preference, not objective "
-        f"analysis, and is kept separate from every data-driven multiplier. The Main Rankings tab "
-        f"shows Pre-Penalty VORP and Pre-Penalty Overall Rank so the unbiased model stays visible.",
-        formats["callout"],
-    )
+    if result.bias_active:
+        ws.merge_range(
+            row, 1, row + 1, 2,
+            f"Players on {league.bias_team} have Final Projected PPG multiplied by "
+            f"{league.bias_team_multiplier:.2f}. This is a personal preference, not objective "
+            f"analysis, and is kept separate from every data-driven multiplier. The Main Rankings tab "
+            f"shows Pre-Penalty VORP and Pre-Penalty Overall Rank so the unbiased model stays visible.",
+            formats["callout"],
+        )
+    else:
+        ws.merge_range(
+            row, 1, row + 1, 2,
+            "None. No team is penalised, so every ranking on this workbook is purely data-driven. "
+            "The team-penalty mechanism is still available -- set BIAS_TEAM in config/league.py to a "
+            "team abbreviation to switch it on, which also restores the penalty and pre-penalty "
+            "columns on the Main Rankings tab.",
+            formats["callout"],
+        )
     row += 3
 
     ws.write(row, 1, "What is NOT in the ranking", formats["subtitle"])
@@ -236,13 +246,13 @@ def _sheet_description(name: str) -> str:
     return ""
 
 
-def _write_main(workbook, formats, df: pd.DataFrame) -> None:
+def _write_main(workbook, formats, df: pd.DataFrame, columns: tuple[Column, ...]) -> None:
     ws = workbook.add_worksheet(MAIN_SHEET)
-    n = _write_table(ws, workbook, formats, df, MAIN_COLUMNS, freeze=(1, 4))
-    apply_flag_formatting(ws, workbook, MAIN_COLUMNS, n)
+    n = _write_table(ws, workbook, formats, df, columns, freeze=(1, 4))
+    apply_flag_formatting(ws, workbook, columns, n)
 
 
-def _write_slot(workbook, formats, df: pd.DataFrame, slot: int, league) -> None:
+def _write_slot(workbook, formats, df: pd.DataFrame, slot: int, league, columns: tuple[Column, ...]) -> None:
     ws = workbook.add_worksheet(f"Pick {slot}")
     picks = strat.pick_sequence(slot, league.num_teams, league.total_roster_spots)
     board = strat.slot_board(df, slot, league)
@@ -265,12 +275,12 @@ def _write_slot(workbook, formats, df: pd.DataFrame, slot: int, league) -> None:
         row += 1
     row += 1
 
-    columns = MAIN_COLUMNS[:3] + SLOT_EXTRA_COLUMNS + MAIN_COLUMNS[3:]
-    n = _write_table(ws, workbook, formats, board, columns, start_row=row, freeze=(row + 1, 0))
-    apply_flag_formatting(ws, workbook, columns, n, first_data_row=row + 1)
+    slot_columns = columns[:3] + SLOT_EXTRA_COLUMNS + columns[3:]
+    n = _write_table(ws, workbook, formats, board, slot_columns, start_row=row, freeze=(row + 1, 0))
+    apply_flag_formatting(ws, workbook, slot_columns, n, first_data_row=row + 1)
 
 
-def _write_tiers(workbook, formats, df: pd.DataFrame, league) -> None:
+def _write_tiers(workbook, formats, df: pd.DataFrame, league, include_team_penalty: bool) -> None:
     ws = workbook.add_worksheet(TIERS_SHEET)
     ws.write(0, 0, "Global Tiers by Position", formats["title"])
     ws.write(
@@ -292,8 +302,9 @@ def _write_tiers(workbook, formats, df: pd.DataFrame, league) -> None:
         Column("final_projected_season_points", "Final Projected Season Points", 13, "num1"),
         Column("consistency_score", "Consistency", 10, "num1"),
         Column("injury_risk_bucket", "Injury Risk", 10, "center"),
-        Column("team_bias_flag", "49ers", 7, "center"),
     )
+    if include_team_penalty:
+        tier_columns += (Column("team_bias_flag", "Team Penalty", 9, "center"),)
 
     row = 3
     for pos in league.scored_positions:
@@ -427,6 +438,7 @@ def write_workbook(result, path) -> str:
 
     df = _prepare_frame(result.rankings)
     league = result.league
+    columns = main_columns(include_team_penalty=result.bias_active)
 
     slot_names = [f"Pick {s}" for s in range(1, league.num_teams + 1)]
     sheet_names = [MAIN_SHEET, *slot_names, TIERS_SHEET, BYE_SHEET, KDST_SHEET]
@@ -435,10 +447,10 @@ def write_workbook(result, path) -> str:
     formats = build_formats(workbook)
 
     _write_cover(workbook, formats, result, sheet_names)
-    _write_main(workbook, formats, df)
+    _write_main(workbook, formats, df, columns)
     for slot in range(1, league.num_teams + 1):
-        _write_slot(workbook, formats, df, slot, league)
-    _write_tiers(workbook, formats, df, league)
+        _write_slot(workbook, formats, df, slot, league, columns)
+    _write_tiers(workbook, formats, df, league, result.bias_active)
     _write_bye(workbook, formats, df, league)
     _write_kdst(workbook, formats, result.kickers, result.defenses)
 

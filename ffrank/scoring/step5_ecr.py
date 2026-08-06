@@ -84,7 +84,7 @@ def explain_disagreement(row, threshold: int | None = None) -> tuple[str, str]:
     if exp_games is not None and not pd.isna(exp_games) and float(exp_games) < 16.0:
         downward.append(f"Expected Games Played discount ({float(exp_games):.1f} of 17)")
     if str(row.get("team_bias_flag", "N")) == "Y":
-        downward.append("the 49ers personal-preference penalty")
+        downward.append("the personal-preference team penalty")
 
     upward = []
     camp = row.get("camp_buzz_score")

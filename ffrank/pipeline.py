@@ -59,6 +59,9 @@ class PipelineResult:
     run_timestamp: str = ""
     league: LeagueConfig = LEAGUE
     diagnostics: dict = field(default_factory=dict)
+    # True when a personal-preference team penalty was applied. Drives whether the workbook
+    # shows the penalty / pre-penalty columns at all.
+    bias_active: bool = False
 
 
 def _compute_ages(rosters: pd.DataFrame, season: int) -> pd.DataFrame:
@@ -285,19 +288,25 @@ def build_rankings(league: LeagueConfig = LEAGUE, log: SourceLog | None = None) 
         df["known_absence_source"] = ""
         df["known_absence_date"] = ""
 
-    # ---------------------------------------------------------------- STEP 3 (two passes)
-    biased = run_step3(df, age_curves, contract_lifts, rookie_baselines, league, apply_team_bias=True)
-    unbiased = run_step3(df, age_curves, contract_lifts, rookie_baselines, league, apply_team_bias=False)
+    # ---------------------------------------------------------------- STEP 3 and STEP 4
+    # A second, unbiased pass only exists to expose what the model would say without the
+    # personal-preference team penalty. With no penalised team configured the two passes are
+    # identical by construction, so it is skipped rather than computed and thrown away.
+    bias_active = bool(league.bias_team)
 
-    # ---------------------------------------------------------------- STEP 4 (two passes)
-    biased = compute_vorp(biased, league)
-    unbiased = compute_vorp(unbiased, league)
+    scored = run_step3(df, age_curves, contract_lifts, rookie_baselines, league, apply_team_bias=True)
+    scored = compute_vorp(scored, league)
 
-    biased["pre_penalty_vorp"] = unbiased["vorp"]
-    biased["pre_penalty_overall_rank"] = unbiased["overall_rank"]
-    biased["pre_penalty_final_projected_season_points"] = unbiased["final_projected_season_points"]
+    if bias_active:
+        unbiased = run_step3(
+            df, age_curves, contract_lifts, rookie_baselines, league, apply_team_bias=False
+        )
+        unbiased = compute_vorp(unbiased, league)
+        scored["pre_penalty_vorp"] = unbiased["vorp"]
+        scored["pre_penalty_overall_rank"] = unbiased["overall_rank"]
+        scored["pre_penalty_final_projected_season_points"] = unbiased["final_projected_season_points"]
 
-    ranked = biased.sort_values("vorp", ascending=False).reset_index(drop=True)
+    ranked = scored.sort_values("vorp", ascending=False).reset_index(drop=True)
     ranked["tier"] = assign_tiers(ranked, value_col="vorp")
     ranked["position_tier"] = positional_tiers(ranked, value_col="vorp")
 
@@ -350,6 +359,7 @@ def build_rankings(league: LeagueConfig = LEAGUE, log: SourceLog | None = None) 
         camp_buzz_age_days=camp.age_days,
         run_timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         league=league,
+        bias_active=bias_active,
         diagnostics={
             "players_ranked": len(ranked),
             "adp_players": int(pd.to_numeric(ranked["adp_blended"], errors="coerce").notna().sum()),
@@ -409,8 +419,8 @@ def _build_notes(df: pd.DataFrame, camp) -> pd.Series:
         bits.append(_txt(getattr(row, "age_curve_note", "")))
         if str(getattr(row, "team_bias_flag", "N")) == "Y":
             bits.append(
-                "49ers personal-preference penalty applied (not objective analysis); "
-                "see pre-penalty VORP and rank columns"
+                f"Personal-preference team penalty applied (x{getattr(row, 'team_bias_multiplier', 1.0):.2f}, "
+                "not objective analysis); see pre-penalty VORP and rank columns"
             )
         bits.append(_txt(getattr(row, "coach_change_note", "")))
         bits.append(_txt(getattr(row, "same_ppg_volatility_flag", "")))

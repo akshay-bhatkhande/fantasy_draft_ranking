@@ -75,7 +75,7 @@ score that has to be converted back later.
 Weighted PPG (Step 1)
   -> Composite Z-Score, position-relative only (Step 2)
   -> Base Projected PPG, back in real points via position mean/stdev (Step 3a)
-  -> x contract-year x age-curve x camp-buzz x 49ers-penalty = Final Projected PPG (Step 3b)
+  -> x contract-year x age-curve x camp-buzz = Final Projected PPG (Step 3b)
   -> x Expected Games Played = Final Projected Season Points (Step 3c-3d)
   -> minus position Replacement Level = VORP (Step 4)
 ```
@@ -106,13 +106,19 @@ is yours to make per roster slot.
 Expert consensus (Step 5) is a **sanity check only**. It never feeds the math. Any player more
 than 15 spots away from consensus gets an auto-generated reason naming the input responsible.
 
+**No team penalty is applied.** Every ranking is purely data-driven, with no personal-preference
+adjustment against any team. The mechanism is still available as a general switch -- set
+`BIAS_TEAM` in `config/league.py` to a team abbreviation to turn it on. While it is off, the
+pipeline skips its second unbiased pass and the workbook omits the penalty and pre-penalty
+columns, so there are no dead columns to read past.
+
 ---
 
 ## Configuration
 
 | File | What lives there |
 |---|---|
-| `config/league.py` | scoring, teams, roster slots, FLEX allocation, target season, 49ers penalty |
+| `config/league.py` | scoring, teams, roster slots, FLEX allocation, target season, optional team penalty |
 | `config/weights.py` | all component weights, multiplier magnitudes, injury buckets, tier method |
 
 Both are plain constants with comments. Nothing in `ffrank/` hardcodes a league rule or a

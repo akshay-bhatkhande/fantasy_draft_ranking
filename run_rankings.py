@@ -74,7 +74,7 @@ def print_summary(result, output_path: Path) -> None:
     top = result.rankings.head(10)
     print("  Top 10 by VORP:")
     for r in top.itertuples():
-        flag = " [49ers penalty]" if str(getattr(r, "team_bias_flag", "N")) == "Y" else ""
+        flag = " [team penalty]" if str(getattr(r, "team_bias_flag", "N")) == "Y" else ""
         print(
             f"    {int(r.overall_rank):>2}. {r.player_name:<24} {r.position:<3} {r.team:<4} "
             f"VORP {r.vorp:6.1f}  tier {r.tier}{flag}"

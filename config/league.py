@@ -104,13 +104,17 @@ MINIMAL_POSITIONS = ("K", "DST")
 
 
 # --------------------------------------------------------------------------------------
-# Personal bias: 49ers de-prioritization
+# Personal-preference team penalty -- DISABLED
 # --------------------------------------------------------------------------------------
-# Not an exclusion -- a flat, visible, configurable penalty, kept deliberately separate
-# from every data-driven multiplier so it is never presented as objective analysis. The
-# pipeline always also computes a pre-penalty pass so you can see the unbiased model.
-# Set BIAS_TEAM = None to disable without touching scoring code.
-BIAS_TEAM: str | None = "SF"
+# Currently off: no team is penalised, and the rankings are purely data-driven.
+#
+# The mechanism is still here because it is a general team-bias switch, not a 49ers-specific
+# hack. To turn it back on, set BIAS_TEAM to a team abbreviation (e.g. "SF"). When it is
+# active the penalty is applied as a flat multiplier kept deliberately separate from every
+# data-driven multiplier, the workbook gains 49ers/pre-penalty columns, and the pipeline runs
+# a second unbiased pass so the model's unbiased opinion stays visible. While it is None,
+# that second pass is skipped and those columns are omitted entirely.
+BIAS_TEAM: str | None = None
 BIAS_TEAM_MULTIPLIER = 0.92
 
 

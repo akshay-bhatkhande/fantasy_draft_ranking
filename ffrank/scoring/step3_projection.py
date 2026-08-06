@@ -5,8 +5,9 @@
     Base Projected PPG comes from the draft-capital rookie baseline instead.
 
 3b  Final Projected PPG = Base Projected PPG
-                          x Contract-Year x Age-Curve x Camp-Buzz x 49ers-Penalty
-    Applied in exactly that order.
+                          x Contract-Year x Age-Curve x Camp-Buzz x Team-Penalty
+    Applied in exactly that order. The team penalty is a personal-preference adjustment and is
+    disabled unless BIAS_TEAM is set in config/league.py, in which case it resolves to 1.00.
 
 3c  Expected Games Played = 17 - known current-season games missed - probabilistic games
     from the injury-risk bucket. A literal games count, never a multiplier on PPG.

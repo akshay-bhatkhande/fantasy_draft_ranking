@@ -98,7 +98,9 @@ POSITION_POOL_MIN_SNAP_SHARE: dict[str, float] = {"QB": 0.25, "RB": 0.10, "WR": 
 
 # ======================================================================================
 # STEP 3b -- Risk multipliers, applied in this order:
-#            Contract-Year x Age-Curve x Camp-Buzz x 49ers-Penalty
+#            Contract-Year x Age-Curve x Camp-Buzz x Team-Penalty
+#            (the team penalty is a personal preference and is currently disabled --
+#             see BIAS_TEAM in config/league.py)
 # ======================================================================================
 
 # --- Camp-Buzz Multiplier: -2..+2 score -> multiplier, hard-capped at +/-8% ------------

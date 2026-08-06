@@ -60,8 +60,8 @@ MAIN_COLUMNS: tuple[Column, ...] = (
     Column("age_curve_multiplier", "Age-Curve Multiplier", 10, "num3"),
     Column("age_curve_assumption", "Age-Curve / Rookie Assumption Used", 44, "wrap"),
     Column("rookie_adjustment_applied", "Rookie Adjustment (share of position mean)", 11, "num3"),
-    Column("team_bias_flag", "49ers Flag (Y/N)", 9, "center"),
-    Column("team_bias_multiplier", "49ers Penalty Multiplier", 10, "num3"),
+    Column("team_bias_flag", "Team Penalty Flag (Y/N)", 9, "center"),
+    Column("team_bias_multiplier", "Team Penalty Multiplier", 10, "num3"),
     Column("pre_penalty_vorp", "Pre-Penalty VORP", 11, "num1"),
     Column("pre_penalty_overall_rank", "Pre-Penalty Overall Rank", 11, "int"),
     Column("consensus_rank", "Consensus Rank (Step 5, sanity check only)", 11, "int"),
@@ -82,6 +82,21 @@ SLOT_EXTRA_COLUMNS: tuple[Column, ...] = (
     Column("availability_probability", "Availability Probability", 11, "num2"),
     Column("realistic_target_pick", "Realistic Target Pick #", 11, "int"),
 )
+
+# Columns that only make sense when a personal-preference team penalty is switched on. With no
+# penalised team they would be a constant "N", a constant 1.000, and two exact duplicates of
+# VORP and Overall Rank, so they are dropped rather than shipped as dead weight.
+TEAM_PENALTY_COLUMN_KEYS: frozenset[str] = frozenset(
+    {"team_bias_flag", "team_bias_multiplier", "pre_penalty_vorp", "pre_penalty_overall_rank"}
+)
+
+
+def main_columns(include_team_penalty: bool) -> tuple[Column, ...]:
+    """Main Rankings columns, omitting the team-penalty block when no team is penalised."""
+    if include_team_penalty:
+        return MAIN_COLUMNS
+    return tuple(c for c in MAIN_COLUMNS if c.key not in TEAM_PENALTY_COLUMN_KEYS)
+
 
 KDST_COLUMNS: tuple[Column, ...] = (
     Column("rank", "Rank", 6, "int"),

@@ -1,7 +1,7 @@
 """Validates the pipeline against the methodology's own worked example.
 
 "Player X": a hypothetical 26-year-old RB, not on a contract year, no current injury, moderate
-positive camp buzz, not on the 49ers.
+positive camp buzz, and no personal-preference team penalty against him.
 
     Weighted PPG            = 16.2
     component z-scores      = PPG +1.30, Opportunity +1.10, Efficiency +0.40,
@@ -10,7 +10,7 @@ positive camp buzz, not on the 49ers.
                             = +1.005
     RB pool                 mean Weighted PPG 11.0, stdev 4.2
     Base Projected PPG      = 11.0 + (1.005 x 4.2)   = 15.22
-    multipliers             contract 1.00 x age 1.00 x camp +1 (1.04) x 49ers 1.00
+    multipliers             contract 1.00 x age 1.00 x camp +1 (1.04) x team penalty 1.00
     Final Projected PPG     = 15.22 x 1.04           = 15.83
     Expected Games Played   = 17 - 0 - 0.2 (Low)     = 16.8
     Final Projected Points  = 15.83 x 16.8           = 265.9
@@ -154,7 +154,7 @@ def _player_x_frame() -> pd.DataFrame:
             "camp_buzz_score": 1,  # moderate positive camp buzz
             "age": 26.0,
             "contract_year": False,
-            "team": "DAL",  # not the 49ers
+            "team": "DAL",
         }
     )
     return pd.DataFrame([player_x, *rows])
@@ -235,10 +235,11 @@ def test_starter_counts_are_derived_not_hardcoded():
     assert counts != starter_counts(LEAGUE)
 
 
-def test_49ers_penalty_lowers_points_and_preserves_unbiased_pass():
-    """The bias multiplier applies only to the flagged team, and the unbiased pass is unaffected."""
+def test_team_penalty_is_disabled_by_default():
+    """No team is penalised, so every player's projection is purely data-driven."""
+    assert LEAGUE.bias_team is None
+
     df = _player_x_frame()
-    df.loc[df["player_id"] == "player-x", "team"] = LEAGUE.bias_team
     scored = compute_composite_z(df)
     scored.loc[scored["player_id"] == "player-x", "composite_z"] = 1.005
 
@@ -246,21 +247,46 @@ def test_49ers_penalty_lowers_points_and_preserves_unbiased_pass():
     lifts = {"RB": ContractYearLift("RB", multiplier=1.05, sample_size=100, derived=True)}
     rookies = {"RB": RookieBaseline("RB")}
 
-    biased = run_step3(scored, curves, lifts, rookies, LEAGUE, apply_team_bias=True)
+    out = run_step3(scored, curves, lifts, rookies, LEAGUE, apply_team_bias=True)
+    assert (out["team_bias_multiplier"] == 1.00).all()
+    assert (out["team_bias_flag"] == "N").all()
+
+    # With no penalised team, asking for the biased and unbiased passes must be identical --
+    # which is exactly why the pipeline skips the second pass entirely.
     unbiased = run_step3(scored, curves, lifts, rookies, LEAGUE, apply_team_bias=False)
+    pd.testing.assert_series_equal(
+        out["final_projected_season_points"], unbiased["final_projected_season_points"]
+    )
+
+
+def test_team_penalty_mechanism_still_works_when_enabled():
+    """The switch is disabled, not deleted: setting BIAS_TEAM must still penalise that team only."""
+    league = dataclasses.replace(LEAGUE, bias_team="SF", bias_team_multiplier=0.92)
+
+    df = _player_x_frame()
+    df.loc[df["player_id"] == "player-x", "team"] = "SF"
+    scored = compute_composite_z(df)
+    scored.loc[scored["player_id"] == "player-x", "composite_z"] = 1.005
+
+    curves = {"RB": AgeCurve("RB", peak_age=27.0, decline_per_year=0.03, sample_size=500, fitted=True)}
+    lifts = {"RB": ContractYearLift("RB", multiplier=1.05, sample_size=100, derived=True)}
+    rookies = {"RB": RookieBaseline("RB")}
+
+    biased = run_step3(scored, curves, lifts, rookies, league, apply_team_bias=True)
+    unbiased = run_step3(scored, curves, lifts, rookies, league, apply_team_bias=False)
 
     bx = biased[biased["player_id"] == "player-x"].iloc[0]
     ux = unbiased[unbiased["player_id"] == "player-x"].iloc[0]
 
     assert bx["team_bias_flag"] == "Y"
-    assert bx["team_bias_multiplier"] == pytest.approx(LEAGUE.bias_team_multiplier)
+    assert bx["team_bias_multiplier"] == pytest.approx(0.92)
     assert ux["team_bias_multiplier"] == pytest.approx(1.00)
     assert bx["final_projected_season_points"] < ux["final_projected_season_points"]
     assert bx["final_projected_season_points"] == pytest.approx(
-        ux["final_projected_season_points"] * LEAGUE.bias_team_multiplier, abs=0.1
+        ux["final_projected_season_points"] * 0.92, abs=0.1
     )
 
-    # A non-49ers player in the same pool must be untouched by the penalty.
+    # A player on any other team must be untouched by the penalty.
     other = biased[biased["player_id"] == "pool-0"].iloc[0]
     assert other["team_bias_flag"] == "N"
     assert other["team_bias_multiplier"] == pytest.approx(1.00)
