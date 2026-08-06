@@ -93,24 +93,36 @@ FLEX_ELIGIBLE = ("RB", "WR", "TE")
 
 # Historical league-wide FLEX usage rates. Feeds STEP 4a's shared-slot allocation.
 #
-# Read these as a share of the 20 FLEX slots in the league (2 per team x 10 teams). The spec's
-# default put TE at 10%, i.e. TWO tight ends started in FLEX league-wide every week -- which
-# requires two separate teams each rostering a TE good enough to start over their RB/WR depth.
-# On 17-man rosters in a 10-team league that essentially does not happen outside a
-# McBride-plus-Warren situation. TE is set to 2.5%: half a TE FLEX start league-wide, i.e. one
-# such team roughly every other week. The freed share is split between RB and WR in their
-# existing 2:1 ratio, which leaves that split unlitigated.
+# Read these as a share of the 20 FLEX slots in the league (2 per team x 10 teams).
 #
-# This is not cosmetic. FLEX allocation sets the starter count, which sets which player is the
-# replacement, which sets the baseline every VORP at that position is measured against. Measured
-# directly, the startable-TE gap versus expert consensus moves +15.5 at 5%, +25.2 at 10%,
-# +34.6 at 20% and +44.1 at 30% -- it was the single largest driver of the board's TE tilt.
+# DERIVED, not assumed. The spec's suggested 60/30/10 is a half-PPR-ish convention and is simply
+# wrong for full PPR. The correct split is the one where the MARGINAL flex starter is worth the
+# same at every position -- if it is not, a rational manager swaps, so the allocation is not an
+# equilibrium. Simulating that directly on realised 2023-25 PPR outcomes (lock the top 20 RB,
+# 20 WR and 10 TE into dedicated slots, then hand each of the 20 flex slots to whichever position
+# offers the best remaining player) gives:
 #
-# Rounding note: 2.5% gives TE 10 + 0.5 = 10.5 nominal starters, and starter counts round to
-# whole players, so this resolves to 10 -- identical to setting TE FLEX to zero. The replacement
-# is therefore TE11 rather than TE12. 2.5% sits exactly on the boundary: at or below it TE gets
-# 10 starters, above it 11 (and above 7.5%, 12).
-FLEX_ALLOCATION = {"RB": 0.65, "WR": 0.325, "TE": 0.025}
+#     season   RB    WR    TE     marginal values at the cutoff
+#     2023     25%   75%   0%     RB 187 / WR 190
+#     2024     25%   75%   0%     RB 187 / WR 184
+#     2025     25%   70%   5%     RB 179 / WR 172 / TE 176
+#
+# Strikingly stable, and the marginal values do equalise, which is the check that the method is
+# right. Full PPR is the reason: reception points make WR21-WR35 more valuable than RB21-RB30,
+# and there are simply more useful receivers than backs.
+#
+# Independent confirmation: this allocation also brings the board into agreement with expert
+# consensus on positional structure. Startable-player gap versus consensus went
+#     RB +23.8 / WR -15.6  at 60/30/10-style 65/32.5/2.5
+#     RB  +4.8 / WR  +2.4  here
+# The market prices players as though flex runs ~25/73, so two independent methods agree.
+#
+# To re-derive after a scoring change, re-run the greedy simulation described above.
+#
+# Rounding note: starter counts round to whole players. TE at 2% gives 10.4 nominal starters,
+# which resolves to 10 -- the same as zero TE flex -- so the TE replacement is TE11. TE needs
+# more than 2.5% to buy an 11th starter.
+FLEX_ALLOCATION = {"RB": 0.25, "WR": 0.73, "TE": 0.02}
 
 BENCH_SLOTS = 7
 

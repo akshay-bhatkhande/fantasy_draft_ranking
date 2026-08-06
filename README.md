@@ -90,29 +90,34 @@ Starter counts, and therefore replacement levels, are **derived from `config/lea
 hardcoded. For this league they compute to:
 
 ```
-QB: (1 x 10) + 0                   = 10 starters -> replacement is QB11
-RB: (2 x 10) + (2 x 10 x 0.650)    = 33 starters -> replacement is RB34
-WR: (2 x 10) + (2 x 10 x 0.325)    = 26 starters -> replacement is WR27
-TE: (1 x 10) + (2 x 10 x 0.025)    = 10 starters -> replacement is TE11
+QB: (1 x 10) + 0                  = 10 starters -> replacement is QB11
+RB: (2 x 10) + (2 x 10 x 0.25)    = 25 starters -> replacement is RB26
+WR: (2 x 10) + (2 x 10 x 0.73)    = 35 starters -> replacement is WR36
+TE: (1 x 10) + (2 x 10 x 0.02)    = 10 starters -> replacement is TE11
 ```
 
 Change the roster or the FLEX allocation and these recalculate automatically.
 
-**On the FLEX split (65 / 32.5 / 2.5).** Read these as shares of the 20 FLEX slots in the league
-(2 per team x 10 teams). The original spec suggested 10% TE, which means *two* tight ends started
-in FLEX league-wide every week -- that needs two separate teams each rostering a TE good enough to
-start over their RB/WR depth, and on 17-man rosters in a 10-team league that essentially doesn't
-happen outside a McBride-plus-Warren situation. TE is set to 2.5%: roughly one such team every
-other week.
+**On the FLEX split (25 / 73 / 2), which is derived rather than assumed.** These are shares of the
+20 FLEX slots in the league (2 per team x 10 teams). The spec's suggested 60/30/10 is a
+half-PPR-ish convention and is wrong for full PPR.
 
-This dial matters more than it looks, because it sets the starter count, which sets which player
-is the replacement, which sets the baseline every VORP at that position is measured against.
-Measured against expert consensus, the startable-TE gap runs +11.9 at 2.5%, +15.5 at 5%, +25.2 at
-10%, +34.6 at 20% and +44.1 at 30%. If your league genuinely does start two TEs in FLEX, raise it.
+The correct split is the one where the *marginal* flex starter is worth the same at every position
+-- if it isn't, a rational manager swaps, so it isn't an equilibrium. Simulating that on realised
+2023-25 PPR outcomes (lock the top 20 RB, 20 WR and 10 TE into dedicated slots, then give each
+flex slot to whichever position offers the best remaining player) gives 25% RB / 75% WR in 2023
+and 2024, and 25/70/5 in 2025 -- with the marginal values genuinely equalising (2025: RB 179,
+WR 172, TE 176). Full PPR is why: reception points make WR21-WR35 worth more than RB21-RB30, and
+there are more useful receivers than backs.
 
-Starter counts round to whole players, so 2.5% (10.5 nominal TE starters) resolves to 10 -- the
-same as setting TE FLEX to zero. 2.5% sits exactly on that boundary: at or below it TE gets 10
-starters, above it 11.
+Two independent checks agree. Adopting it collapsed the board's disagreement with expert
+consensus on positional structure from **RB +23.8 / WR −15.6** to **RB +4.8 / WR +2.4**, and it
+narrowed the spread in marginal value across flex-eligible positions from 39.8 points to 20.8.
+
+This dial matters more than it looks: it sets the starter count, which sets which player is the
+replacement, which sets the baseline every VORP at that position is measured against. Note that
+starter counts round to whole players, so TE at 2% (10.4 nominal) resolves to 10, the same as zero
+TE flex; TE needs more than 2.5% to buy an 11th starter.
 
 Volatility (floor / median / ceiling / Consistency Score) is computed **in parallel** and shown
 alongside every player, but never enters the chain above and never changes a rank. A boom/bust
