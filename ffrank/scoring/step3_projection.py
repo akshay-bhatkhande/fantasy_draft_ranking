@@ -36,7 +36,19 @@ def base_projected_ppg(
     """STEP 3a: turn the position-relative z-score back into a real points-per-game number.
 
     Requires pos_mean_weighted_ppg and pos_std_weighted_ppg (produced in STEP 2 from the same
-    position pool), plus composite_z. Rookies use the rookie adjustment instead.
+    position pool), plus composite_z.
+
+    Two groups bypass the z-score conversion and use the draft-capital baseline instead:
+
+    * Rookies, who have no NFL record to convert.
+    * Anyone else with no usable production history. This matters more than it sounds: a quarter
+      of the board has no Weighted PPG at all, and only a seventh of those are rookies. The rest
+      are mostly second-year players who barely played. Without this branch their Composite
+      Z-Score is assembled from situational context and ADP alone, those two roughly cancel, and
+      the player inherits something close to the positional MEAN -- so a camp-body back with no
+      carries and no ADP was landing near 12 PPG and inside the top 100 overall, ahead of real
+      starters. Draft capital is a far better prior for a player with no record than "average
+      NFL starter" is.
     """
     out = df.copy()
     mean = pd.to_numeric(out["pos_mean_weighted_ppg"], errors="coerce")
@@ -49,7 +61,11 @@ def base_projected_ppg(
     out["rookie_note"] = ""
 
     is_rookie = out["is_rookie"].fillna(False).astype(bool)
-    for idx in out.index[is_rookie]:
+    # "No usable history" = STEP 1 produced nothing for him.
+    no_history = pd.to_numeric(out["weighted_ppg"], errors="coerce").isna()
+    use_draft_capital = is_rookie | no_history
+
+    for idx in out.index[use_draft_capital]:
         pos = out.at[idx, "position"]
         baseline = rookie_baselines.get(pos)
         tier = out.at[idx, "draft_capital_tier"]
@@ -59,8 +75,18 @@ def base_projected_ppg(
         share, derived = baseline.share_for(tier)
         out.at[idx, "base_projected_ppg"] = pos_mean * share
         out.at[idx, "rookie_adjustment_applied"] = share
-        out.at[idx, "base_ppg_method"] = "STEP 3a (rookie): position mean x draft-capital baseline"
-        out.at[idx, "rookie_note"] = C.rookie_note(pos, tier, share, derived)
+        if bool(is_rookie.at[idx]):
+            out.at[idx, "base_ppg_method"] = "STEP 3a (rookie): position mean x draft-capital baseline"
+            out.at[idx, "rookie_note"] = C.rookie_note(pos, tier, share, derived)
+        else:
+            out.at[idx, "base_ppg_method"] = (
+                "STEP 3a (no production history): position mean x draft-capital baseline"
+            )
+            out.at[idx, "rookie_note"] = (
+                f"No usable production history in the lookback window, so the Composite Z-Score "
+                f"is not meaningful; projected from {tier} draft capital instead "
+                f"({share:.2f}x the {pos} pool mean)"
+            )
 
     # A projection below zero is not meaningful in a PPR format.
     out["base_projected_ppg"] = out["base_projected_ppg"].clip(lower=0.0)
