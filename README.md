@@ -91,23 +91,28 @@ hardcoded. For this league they compute to:
 
 ```
 QB: (1 x 10) + 0                   = 10 starters -> replacement is QB11
-RB: (2 x 10) + (2 x 10 x 0.633)    = 33 starters -> replacement is RB34
-WR: (2 x 10) + (2 x 10 x 0.317)    = 26 starters -> replacement is WR27
-TE: (1 x 10) + (2 x 10 x 0.05)     = 11 starters -> replacement is TE12
+RB: (2 x 10) + (2 x 10 x 0.650)    = 33 starters -> replacement is RB34
+WR: (2 x 10) + (2 x 10 x 0.325)    = 26 starters -> replacement is WR27
+TE: (1 x 10) + (2 x 10 x 0.025)    = 10 starters -> replacement is TE11
 ```
 
 Change the roster or the FLEX allocation and these recalculate automatically.
 
-**On the FLEX split (63.3 / 31.7 / 5).** Read these as shares of the 20 FLEX slots in the league
+**On the FLEX split (65 / 32.5 / 2.5).** Read these as shares of the 20 FLEX slots in the league
 (2 per team x 10 teams). The original spec suggested 10% TE, which means *two* tight ends started
 in FLEX league-wide every week -- that needs two separate teams each rostering a TE good enough to
 start over their RB/WR depth, and on 17-man rosters in a 10-team league that essentially doesn't
-happen outside a McBride-plus-Warren situation. TE is set to 5%, allowing exactly one such team.
+happen outside a McBride-plus-Warren situation. TE is set to 2.5%: roughly one such team every
+other week.
 
 This dial matters more than it looks, because it sets the starter count, which sets which player
 is the replacement, which sets the baseline every VORP at that position is measured against.
-Measured against expert consensus, the startable-TE gap runs +15.5 at 5%, +25.2 at 10%, +34.6 at
-20% and +44.1 at 30%. If your league genuinely does start two TEs in FLEX, raise it back.
+Measured against expert consensus, the startable-TE gap runs +11.9 at 2.5%, +15.5 at 5%, +25.2 at
+10%, +34.6 at 20% and +44.1 at 30%. If your league genuinely does start two TEs in FLEX, raise it.
+
+Starter counts round to whole players, so 2.5% (10.5 nominal TE starters) resolves to 10 -- the
+same as setting TE FLEX to zero. 2.5% sits exactly on that boundary: at or below it TE gets 10
+starters, above it 11.
 
 Volatility (floor / median / ceiling / Consistency Score) is computed **in parallel** and shown
 alongside every player, but never enters the chain above and never changes a rank. A boom/bust

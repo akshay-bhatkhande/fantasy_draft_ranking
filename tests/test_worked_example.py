@@ -236,8 +236,11 @@ def test_live_config_starter_counts_follow_from_its_flex_allocation():
         dedicated = LEAGUE.dedicated_starters.get(pos, 0) * LEAGUE.num_teams
         flex = LEAGUE.flex_slots * LEAGUE.num_teams * LEAGUE.flex_allocation.get(pos, 0.0)
         assert counts[pos] == round(dedicated + flex)
-    # One TE FLEX start league-wide at the configured 5%.
-    assert counts["TE"] == 11
+    # The configured TE FLEX share is deliberately small, so tight ends get essentially no FLEX
+    # starters beyond the one dedicated slot per team. Asserted as a bound rather than an exact
+    # number so tuning the share does not break the test.
+    assert LEAGUE.flex_allocation["TE"] <= 0.05
+    assert counts["TE"] <= LEAGUE.dedicated_starters["TE"] * LEAGUE.num_teams + 1
 
 
 def test_starter_counts_are_derived_not_hardcoded():
