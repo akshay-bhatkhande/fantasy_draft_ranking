@@ -173,6 +173,13 @@ def adp_cache_age_days(year: int, teams: int = 10, scoring: str = "ppr") -> floa
 ECR_REDRAFT_PAGE_TYPE = "redraft-overall"
 ECR_REDRAFT_TYPE = "ro"
 
+# The consensus list is an OVERALL board: 511 players including 33 kickers and 31 team defenses,
+# 31 of which sit inside its top 250. Our VORP board contains only skill positions, so comparing
+# our rank directly against theirs pads every consensus rank by the K/DST slots above the player
+# and manufactures disagreement that is purely a difference in what the two lists contain.
+# Removing them and re-ranking over skill positions cut mean |delta| from 61.3 to 48.4.
+ECR_COMPARABLE_POSITIONS = ("QB", "RB", "WR", "TE")
+
 
 def load_ecr_redraft(log: SourceLog | None = None) -> pd.DataFrame:
     """FantasyPros redraft ECR via nflreadpy's dynastyprocess mirror.
@@ -199,6 +206,13 @@ def load_ecr_redraft(log: SourceLog | None = None) -> pd.DataFrame:
 
     out["ecr"] = pd.to_numeric(out.get("ecr"), errors="coerce")
     out = out.dropna(subset=["ecr"]).sort_values("ecr")
+
+    # Keep the raw overall position for reference, then restrict to the positions our board
+    # actually ranks before re-numbering, so the comparison is like for like.
+    out["consensus_rank_overall"] = range(1, len(out) + 1)
+    if "pos" in out.columns:
+        out = out[out["pos"].isin(ECR_COMPARABLE_POSITIONS)].copy()
+
     # ECR is an average rank with ties/decimals; give it a clean integer ordering to
     # compare rank-vs-rank against our board.
     out["consensus_rank"] = range(1, len(out) + 1)

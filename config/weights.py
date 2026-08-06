@@ -51,6 +51,31 @@ EFFICIENCY_SUB_WEIGHTS: dict[str, dict[str, float]] = {
     "QB": {"ypa": 1 / 3, "td_rate_vs_expected": 1 / 3, "sack_rate_avoided": 1 / 3},
 }
 
+# --- Composite Z normalisation (feeds STEP 3a) ----------------------------------------
+# STEP 3a converts the Composite Z back into points with
+#     base = position mean + (Composite Z x position stdev)
+# which only holds if the Composite Z has unit variance. It does not. It is a WEIGHTED
+# AVERAGE of five z-scores, and averaging shrinks variance: with independent components the
+# std would be sqrt(sum of squared weights) = 0.515, and with the observed component
+# correlations it measures 0.58 (QB), 0.77 (RB), 0.75 (WR), 0.83 (TE).
+#
+# The consequence is a positional bias that nobody chose. Because TE components are the most
+# correlated (mean pairwise +0.45) and QB the least (+0.33 for RB), each position's projections
+# get compressed by a DIFFERENT factor -- measured against realised 2023-25 outcomes, our
+# top-to-replacement spread was 0.57x for QB, 0.54x RB, 0.67x WR, 0.72x TE. Tight ends kept the
+# most of their spread, which is a large part of why the board ranked TEs far above consensus.
+#
+# Normalising the Composite Z to unit variance inside each position pool makes STEP 3a do what
+# it says, and removes the accidental positional scaling. It also brings the displayed column in
+# line with the documented "roughly -3 to +3" range.
+COMPOSITE_Z_NORMALIZE = True
+
+# Deliberate, uniform shrinkage applied AFTER normalisation. Projections should be somewhat
+# compressed relative to realised outcomes, because the player who actually finishes first at a
+# position is partly lucky. 1.0 = no extra shrink; the point is that any shrinkage is now an
+# explicit choice applied equally to every position, rather than an artifact.
+COMPOSITE_Z_SHRINKAGE = 1.0
+
 # Minimum sample before an efficiency rate is trusted; below this it is "insufficient
 # data" and the component is dropped from that player's equal-weighted average rather
 # than being filled with a noisy small-sample number.
@@ -309,7 +334,18 @@ ADP_UNDRAFTED_PADDING_PICKS = 12
 # ======================================================================================
 # STEP 5 -- Expert consensus sanity check (never feeds the math)
 # ======================================================================================
-ECR_DELTA_FLAG_THRESHOLD = 15  # spots of disagreement that trigger an auto-generated reason
+# A FIXED spot threshold is the wrong shape for this. VORP density rises steeply down the board,
+# so 15 spots near the top is a genuine disagreement about tiers while 15 spots at rank 200 is
+# noise between two players you would never start. On the shipped board a flat 15 fired 166
+# times, including constantly in the undraftable tail.
+#
+# So the threshold scales with depth, and players below replacement level are not flagged at all
+# because the comparison carries no decision value there.
+ECR_DELTA_FLAG_THRESHOLD = 15  # base, applies at the very top of the board
+ECR_DELTA_FLAG_PER_RANK = 0.12  # widens by ~12 spots per 100 ranks of depth
+ECR_DELTA_FLAG_MAX = 45
+# Only flag players projected above their position's replacement level.
+ECR_FLAG_REQUIRE_ABOVE_REPLACEMENT = True
 
 
 def validate() -> None:

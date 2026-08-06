@@ -394,6 +394,69 @@ def test_role_priors_are_monotonic_down_the_depth_chart():
     assert derive_role_opportunity_priors(depth, pd.DataFrame(), pd.DataFrame()) == {}
 
 
+def test_composite_z_is_unit_variance_so_step3a_recovers_the_real_spread():
+    """STEP 3a multiplies Composite Z by the position stdev, which needs Composite Z ~ N(0,1).
+
+    A weighted average of five correlated z-scores has std well below 1 (0.77-0.85 measured
+    here), so without rescaling every position's projections are compressed by a different
+    factor and the board is silently tilted between positions.
+    """
+    from ffrank.scoring.step2_composite import compute_composite_z
+
+    rng = np.random.default_rng(4)
+    n = 80
+    df = pd.DataFrame({
+        "player_id": [f"p{i}" for i in range(n)],
+        "position": ["RB"] * n,
+        "weighted_ppg": rng.normal(12, 4, n),
+        "opportunity_value": rng.normal(0.3, 0.1, n),
+        "efficiency_value": rng.normal(0, 1, n),
+        "situational_value": rng.normal(0, 1, n),
+        "adp_blended": rng.uniform(1, 200, n),
+        "snap_share": rng.uniform(0.2, 0.9, n),
+    })
+    out = compute_composite_z(df)
+    pool = out[out["in_position_pool"]]
+    assert pool["composite_z"].std(ddof=0) == pytest.approx(1.0, abs=0.02)
+    # The raw, unscaled composite is retained for auditing and must be visibly smaller.
+    assert pool["composite_z_raw"].std(ddof=0) < 0.95
+    assert (pool["composite_z_scale"] > 0).all()
+
+
+def test_consensus_list_excludes_kickers_and_defenses():
+    """Our board has no K/DST, so the consensus rank must be re-numbered over skill positions.
+
+    Left in, 31 kickers and defenses sit inside the consensus top 250 and pad every skill
+    player's rank, manufacturing disagreement that is only a difference in list contents.
+    """
+    from ffrank.data.market import ECR_COMPARABLE_POSITIONS
+    assert set(ECR_COMPARABLE_POSITIONS) == {"QB", "RB", "WR", "TE"}
+
+
+def test_ecr_flag_threshold_widens_with_depth():
+    """15 spots is a tier at the top and noise at rank 200, so the threshold cannot be flat."""
+    from ffrank.scoring.step5_ecr import flag_threshold_for_rank
+
+    top = flag_threshold_for_rank(5)
+    mid = flag_threshold_for_rank(100)
+    deep = flag_threshold_for_rank(240)
+    assert top < mid < deep
+    assert top >= W.ECR_DELTA_FLAG_THRESHOLD
+    assert deep <= W.ECR_DELTA_FLAG_MAX
+
+
+def test_ecr_flag_suppressed_below_replacement():
+    """A disagreement about two unstartable players carries no decision value."""
+    from ffrank.scoring.step5_ecr import explain_disagreement
+
+    below = {"ecr_delta": 90, "overall_rank": 200, "vorp": -40.0,
+             "z_opportunity": 1.5, "expected_games_played": 16.8, "team_bias_flag": "N", "camp_buzz_score": 0}
+    assert explain_disagreement(below) == ("", "")
+    above = {**below, "vorp": 25.0}
+    flag, reason = explain_disagreement(above)
+    assert flag and reason
+
+
 def test_composite_weights_sum_to_one():
     assert sum(W.COMPOSITE_WEIGHTS.values()) == pytest.approx(1.0)
     assert sum(W.RECENCY_WEIGHTS.values()) == pytest.approx(1.0)

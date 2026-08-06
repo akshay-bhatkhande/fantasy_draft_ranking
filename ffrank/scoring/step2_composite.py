@@ -173,6 +173,26 @@ def compute_composite_z(
     )
     out["composite_weight_coverage"] = weight_total
 
+    # Rescale to unit variance inside each position pool. STEP 3a multiplies this by the
+    # position's PPG standard deviation, which only recovers the real spread if the Composite Z
+    # is itself a standard normal -- and a weighted average of five correlated z-scores is not.
+    # Left unscaled it compresses every position by a different factor (0.58x to 0.83x here),
+    # which silently tilts the board between positions. See COMPOSITE_Z_NORMALIZE.
+    out["composite_z_raw"] = out["composite_z"]
+    out["composite_z_scale"] = 1.0
+    if W.COMPOSITE_Z_NORMALIZE:
+        for pos in out["position"].dropna().unique():
+            pos_mask = out["position"] == pos
+            pool_vals = out.loc[pos_mask & out["in_position_pool"], "composite_z"].dropna()
+            if len(pool_vals) < 3:
+                continue
+            sd = pool_vals.std(ddof=0)
+            if not sd or np.isnan(sd):
+                continue
+            out.loc[pos_mask, "composite_z"] = out.loc[pos_mask, "composite_z"] / sd
+            out.loc[pos_mask, "composite_z_scale"] = sd
+        out["composite_z"] = out["composite_z"] * W.COMPOSITE_Z_SHRINKAGE
+
     def _missing_note(row) -> str:
         missing = [c.replace("z_", "") for c in z_cols if pd.isna(row[c])]
         if not missing:

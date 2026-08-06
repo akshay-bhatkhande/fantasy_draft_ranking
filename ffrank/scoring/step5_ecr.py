@@ -51,15 +51,38 @@ def attach_consensus(df: pd.DataFrame, ecr: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def flag_threshold_for_rank(rank, base: int | None = None) -> float:
+    """How many spots of disagreement count as meaningful at a given depth.
+
+    Scales with rank because VORP density does. Near the top, 15 spots separates tiers; at rank
+    200 the same 15 spots separates two players who are both far below replacement.
+    """
+    base = W.ECR_DELTA_FLAG_THRESHOLD if base is None else base
+    if rank is None or pd.isna(rank):
+        return float(base)
+    return float(min(base + W.ECR_DELTA_FLAG_PER_RANK * float(rank), W.ECR_DELTA_FLAG_MAX))
+
+
 def explain_disagreement(row, threshold: int | None = None) -> tuple[str, str]:
     """Build the flag and one-line reason for a player who diverges from consensus.
 
     The reason names the component z-score that is furthest from average, since that is the
     input actually responsible for the disagreement.
     """
-    threshold = W.ECR_DELTA_FLAG_THRESHOLD if threshold is None else threshold
     delta = row.get("ecr_delta")
-    if delta is None or pd.isna(delta) or abs(delta) <= threshold:
+    if delta is None or pd.isna(delta):
+        return "", ""
+
+    # Below replacement there is no decision to inform, so a disagreement is not worth surfacing.
+    if W.ECR_FLAG_REQUIRE_ABOVE_REPLACEMENT:
+        vorp = row.get("vorp")
+        if vorp is not None and not pd.isna(vorp) and float(vorp) <= 0:
+            return "", ""
+
+    effective = (
+        flag_threshold_for_rank(row.get("overall_rank")) if threshold is None else float(threshold)
+    )
+    if abs(delta) <= effective:
         return "", ""
 
     higher_than_consensus = delta > 0  # consensus ranks him later => we like him more
