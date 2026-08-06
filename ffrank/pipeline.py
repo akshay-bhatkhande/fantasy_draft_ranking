@@ -307,6 +307,21 @@ def build_rankings(league: LeagueConfig = LEAGUE, log: SourceLog | None = None) 
         scored["pre_penalty_final_projected_season_points"] = unbiased["final_projected_season_points"]
 
     ranked = scored.sort_values("vorp", ascending=False).reset_index(drop=True)
+
+    # Trim to the draftable board. This happens AFTER STEP 4 so replacement levels, position
+    # ranks and the STEP 3a distributions were all derived from the full population -- trimming
+    # first would move the replacement player and change every VORP. It happens BEFORE tiering
+    # so tiers, volatility comparisons and consensus flags describe the players you can actually
+    # draft, rather than being diluted by hundreds of identical fallback projections.
+    #
+    # Overall Rank and Position Rank stay correct without renumbering: taking the top N by VORP
+    # keeps a prefix of each position's ordering, since VORP within a position differs from
+    # projected points only by that position's constant replacement level.
+    full_pool_size = len(ranked)
+    limit = league.output_player_limit
+    if limit is not None and full_pool_size > limit:
+        ranked = ranked.head(limit).copy()
+
     ranked["tier"] = assign_tiers(ranked, value_col="vorp")
     ranked["position_tier"] = positional_tiers(ranked, value_col="vorp")
 
@@ -362,11 +377,19 @@ def build_rankings(league: LeagueConfig = LEAGUE, log: SourceLog | None = None) 
         bias_active=bias_active,
         diagnostics={
             "players_ranked": len(ranked),
+            "full_pool_size": full_pool_size,
+            "output_limit": league.output_player_limit,
             "adp_players": int(pd.to_numeric(ranked["adp_blended"], errors="coerce").notna().sum()),
             "ecr_matched": int(ranked["consensus_rank"].notna().sum()),
             "routes_source": (ranked["routes_source"].dropna().iloc[0] if "routes_source" in ranked.columns and ranked["routes_source"].notna().any() else "unavailable"),
+            # Counted both in the override files and on the trimmed board, because a player can
+            # legitimately be in a file yet rank outside the output limit (a season-ending
+            # absence drops him to the bottom). Reporting only the board count reads as though
+            # the file had not been loaded.
             "known_absences": int((pd.to_numeric(ranked["known_games_missed"], errors="coerce").fillna(0) > 0).sum()),
+            "known_absences_in_file": int(len(absences)),
             "camp_buzz_players": int((pd.to_numeric(ranked["camp_buzz_score"], errors="coerce").fillna(0) != 0).sum()),
+            "camp_buzz_in_file": int(len(camp.scores)),
         },
     )
 

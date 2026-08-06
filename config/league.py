@@ -99,6 +99,16 @@ BENCH_SLOTS = 7
 # Positions that go through the full STEP 1-4 VORP pipeline.
 SCORED_POSITIONS = ("QB", "RB", "WR", "TE")
 
+# How many players to actually put on the board. Only 170 picks happen in this league
+# (10 teams x 17 spots), so a 900-row sheet is mostly noise -- hundreds of those players share
+# an identical fallback projection and will never be drafted.
+#
+# This truncates the OUTPUT only. Every statistical input is still computed from the full player
+# population first: the STEP 3a position mean/stdev, the STEP 2 z-score pools, and the STEP 4b
+# replacement levels. Cutting before those were computed would move the replacement level and
+# silently change every VORP on the sheet. Set to None to keep everyone.
+OUTPUT_PLAYER_LIMIT: int | None = 250
+
 # Positions handled minimally (recency-weighted PPG rank only, no VORP) -- draft last/stream.
 MINIMAL_POSITIONS = ("K", "DST")
 
@@ -135,6 +145,7 @@ class LeagueConfig:
     lookback_seasons: tuple[int, ...] = tuple(LOOKBACK_SEASONS)
     scored_positions: tuple[str, ...] = SCORED_POSITIONS
     minimal_positions: tuple[str, ...] = MINIMAL_POSITIONS
+    output_player_limit: int | None = OUTPUT_PLAYER_LIMIT
     bias_team: str | None = BIAS_TEAM
     bias_team_multiplier: float = BIAS_TEAM_MULTIPLIER
 

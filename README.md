@@ -138,7 +138,10 @@ built, since dropping one to match the count would lose requested content.)
   block showing the replacement levels, fitted age curves, derived contract-year lifts and
   rookie baselines actually used this run.
 - **Main Rankings** -- the single source of truth. Every other tab filters or annotates these
-  exact numbers.
+  exact numbers. Capped at the top 250 players (`OUTPUT_PLAYER_LIMIT` in `config/league.py`),
+  since only 170 picks happen in this league. The cap is applied *after* Step 4, so replacement
+  levels and the Step 3a position distributions are still computed from the full ~900-player
+  population -- trimming earlier would move the replacement player and change every VORP.
 - **Pick 1-10** -- one per draft slot: computed snake pick sequence, recommended strategy with
   reasoning tied to the VORP obtainable at *your* picks, a "likely available at your next pick"
   indicator, a clearly-labelled **Slot-Adjusted Tier** (never confused with the global Tier),

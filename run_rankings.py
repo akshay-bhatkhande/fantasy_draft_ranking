@@ -41,14 +41,26 @@ def print_summary(result, output_path: Path) -> None:
     print("=" * 78)
     print(f"  {LEAGUE.target_season} rankings refreshed - {result.run_timestamp}")
     print("=" * 78)
-    print(f"  Players ranked          : {d['players_ranked']} across {', '.join(LEAGUE.scored_positions)}")
+    pool_note = ""
+    if d.get("output_limit") and d.get("full_pool_size", 0) > d["players_ranked"]:
+        pool_note = (
+            f" (trimmed from {d['full_pool_size']}; replacement levels and position "
+            f"distributions still computed on all {d['full_pool_size']})"
+        )
+    print(f"  Players ranked          : {d['players_ranked']} across {', '.join(LEAGUE.scored_positions)}{pool_note}")
     print(f"  ADP matched             : {d['adp_players']} players (Fantasy Football Calculator, "
           f"{LEAGUE.num_teams}-team PPR)")
     print(f"  Consensus (ECR) matched : {d['ecr_matched']} players (sanity check only)")
     print(f"  Routes / YPRR source    : {d['routes_source']}")
-    print(f"  Camp buzz               : {d['camp_buzz_players']} players with a non-zero score; "
-          f"{_fmt_camp_status(result)}")
-    print(f"  Known absences on file  : {d['known_absences']} players")
+    def _file_vs_board(on_board: int, in_file: int) -> str:
+        """A player can be in an override file but rank outside the output limit."""
+        if in_file == on_board:
+            return f"{on_board}"
+        return f"{on_board} on the board, {in_file} in the file ({in_file - on_board} ranked outside the top {d['players_ranked']})"
+
+    print(f"  Camp buzz               : {_file_vs_board(d['camp_buzz_players'], d.get('camp_buzz_in_file', d['camp_buzz_players']))}"
+          f" scored; {_fmt_camp_status(result)}")
+    print(f"  Known absences          : {_file_vs_board(d['known_absences'], d.get('known_absences_in_file', d['known_absences']))}")
 
     print()
     print("  Replacement levels (Step 4b):")

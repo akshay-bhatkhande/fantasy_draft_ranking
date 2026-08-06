@@ -91,6 +91,57 @@ def test_replacement_level_is_the_player_below_the_starter_count():
     assert rb.iloc[counts["RB"]]["vorp"] == pytest.approx(0.0, abs=1e-9)
 
 
+def test_output_limit_must_not_change_replacement_levels_or_vorp():
+    """Trimming the board is cosmetic: it must never move a replacement level.
+
+    Replacement level is the (starter_count + 1)-th player at a position, so if the board were
+    trimmed BEFORE STEP 4 the replacement player could be cut and every VORP at that position
+    would shift. The pipeline therefore trims after STEP 4; this pins that ordering down.
+    """
+    board = _board()
+    full = compute_vorp(board, LEAGUE)
+    levels_full = replacement_levels(board, LEAGUE)
+
+    # Simulate trimming to a draftable board, then recompute.
+    trimmed = full.nlargest(60, "vorp")
+    levels_trimmed = replacement_levels(trimmed, LEAGUE)
+
+    # The trimmed pool no longer contains the replacement players, so recomputing on it gives
+    # different (wrong) answers -- which is exactly why order of operations matters.
+    assert levels_trimmed != levels_full
+
+    # And the values carried on the trimmed rows are still the ones from the full population.
+    for pos in LEAGUE.scored_positions:
+        rows = trimmed[trimmed["position"] == pos]
+        if rows.empty:
+            continue
+        assert rows["replacement_level_points"].nunique() == 1
+        assert rows["replacement_level_points"].iloc[0] == pytest.approx(levels_full[pos])
+
+
+def test_trimming_keeps_a_prefix_of_every_positions_ordering():
+    """Taking the top N by VORP must never skip over a better player at a position.
+
+    Asserted as a prefix property rather than as integer contiguity: tied projections share a
+    rank under method='min' and skip the next integer, so a real board legitimately reads
+    ...72, 73, 73, 75... That is a tie, not an omission.
+    """
+    full = compute_vorp(_board(), LEAGUE).sort_values("vorp", ascending=False).reset_index(drop=True)
+    trimmed = full.head(80)
+    retained = set(trimmed["player_id"])
+
+    assert trimmed["overall_rank"].min() == 1
+
+    for pos in LEAGUE.scored_positions:
+        kept = trimmed[trimmed["position"] == pos]
+        if kept.empty:
+            continue
+        worst_kept_rank = kept["position_rank"].max()
+        at_or_above = full[(full["position"] == pos) & (full["position_rank"] <= worst_kept_rank)]
+        missing = set(at_or_above["player_id"]) - retained
+        assert not missing, f"{pos}: trimming skipped better-ranked players {sorted(missing)}"
+
+
 def test_tiers_are_not_fixed_size_buckets():
     """Tier sizes must follow real gaps in the distribution, not a constant width."""
     # Three clearly separated clusters with a big gap between each.
