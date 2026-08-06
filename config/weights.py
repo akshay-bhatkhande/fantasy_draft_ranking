@@ -56,8 +56,17 @@ EFFICIENCY_SUB_WEIGHTS: dict[str, dict[str, float]] = {
 # than being filled with a noisy small-sample number.
 MIN_ROUTES_FOR_YPRR = 50
 MIN_CARRIES_FOR_RUSH_EFF = 40
+MIN_RECEPTIONS_FOR_REC_EFF = 20
 MIN_DROPBACKS_FOR_QB_EFF = 100
 MIN_TARGETS_FOR_TD_RATE = 25
+
+# Hard clip on any single efficiency sub-component's z-score before it is averaged.
+# Rate stats on tiny samples explode: Brittain Brown's 2 broken tackles on 5 carries is a 0.40
+# broken-tackle rate against a league mean of 0.047, and combined with an equally inflated
+# yards-after-contact figure it produced a +12 sigma efficiency score that cancelled out a
+# -2.3 sigma PPG and lifted a fringe back to 56th overall. The minimum-sample gates above are
+# the real fix; this clip is a backstop so no single component can ever dominate the composite.
+EFFICIENCY_Z_CLIP = 3.0
 
 # --- Situational Context Score: equal-weighted average of these z-scores -------------
 SITUATIONAL_COMPONENTS: tuple[str, ...] = (

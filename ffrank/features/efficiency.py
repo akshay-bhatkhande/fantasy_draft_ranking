@@ -327,6 +327,8 @@ def compute_efficiency_score(
         # raw units are incommensurable (YPRR ~2.0 vs broken tackle rate ~0.15); an
         # unnormalised weighted sum would let the largest-scaled component dominate.
         z_block = block.apply(lambda s: (s - s.mean()) / s.std(ddof=0) if s.std(ddof=0) else s * 0.0)
+        # Backstop against a surviving small-sample outlier dominating the average.
+        z_block = z_block.clip(-W.EFFICIENCY_Z_CLIP, W.EFFICIENCY_Z_CLIP)
         avail = z_block.notna()
         wmat = avail.mul(w_series, axis=1)
         wsum = wmat.sum(axis=1)
@@ -350,6 +352,11 @@ def _merge_pfr(adv_rush: pd.DataFrame, adv_rec: pd.DataFrame) -> pd.DataFrame:
         r["brk_tkl"] = pd.to_numeric(r.get("brk_tkl"), errors="coerce")
         r["att"] = pd.to_numeric(r.get("att"), errors="coerce")
         r["rush_btr"] = r["brk_tkl"] / r["att"].replace(0, np.nan)
+        # Suppress rate stats built on a handful of carries. Without this a 5-carry sample is
+        # treated as equal evidence to a 300-carry season, and small denominators produce
+        # extreme rates that survive z-scoring as huge outliers.
+        thin = r["att"].fillna(0) < W.MIN_CARRIES_FOR_RUSH_EFF
+        r.loc[thin, ["yac_att", "rush_btr"]] = np.nan
         frames.append(r[["pfr_id", "season", "yac_att", "rush_btr"]].rename(columns={"yac_att": "rush_yac_att"}))
     if not adv_rec.empty and {"pfr_id", "season"}.issubset(adv_rec.columns):
         c = adv_rec.copy()
@@ -357,6 +364,8 @@ def _merge_pfr(adv_rush: pd.DataFrame, adv_rec: pd.DataFrame) -> pd.DataFrame:
         c["brk_tkl"] = pd.to_numeric(c.get("brk_tkl"), errors="coerce")
         c["rec"] = pd.to_numeric(c.get("rec"), errors="coerce")
         c["rec_btr"] = c["brk_tkl"] / c["rec"].replace(0, np.nan)
+        thin_rec = c["rec"].fillna(0) < W.MIN_RECEPTIONS_FOR_REC_EFF
+        c.loc[thin_rec, ["yac_r", "rec_btr"]] = np.nan
         frames.append(c[["pfr_id", "season", "yac_r", "rec_btr"]].rename(columns={"yac_r": "rec_yac_r"}))
 
     if not frames:

@@ -45,11 +45,23 @@ def _player_team_counts(
     player_col: str,
     mask: pd.Series,
     label: str,
+    player_games: pd.Series | None = None,
 ) -> pd.DataFrame:
-    """Count events per player-season and per team-season, then convert to a share.
+    """Share of team opportunity per GAME PLAYED, per player-season.
 
-    The team denominator is computed on the same mask, so e.g. red-zone carry share is
-    genuinely "this player's red-zone carries over his team's red-zone carries".
+    Computed as (player events per game he played) / (team events per game the team played),
+    NOT as raw season totals. This matters as much here as it does in STEP 1, and for the same
+    reason: a player who misses half the season accumulates half the raw team share, so a
+    totals-based share punishes an injury-shortened season a second time on top of the
+    Expected Games Played discount in STEP 3c.
+
+    The size of the error is not marginal. In 2025 Omarion Hampton took 124 carries in 9 games
+    while the Chargers ran 411 times across 17. Season totals give him a 0.302 carry share
+    against Kyren Williams' 0.566 -- but per game played they are 0.570 and 0.566, essentially
+    identical. The totals view invented a 26-point gap that did not exist.
+
+    The team denominator uses the same mask, so red-zone carry share is genuinely "this
+    player's red-zone carries per game over his team's red-zone carries per game".
     """
     sub = pbp[mask & pbp[player_col].notna()]
     if sub.empty:
@@ -61,18 +73,40 @@ def _player_team_counts(
         .reset_index(name="player_count")
         .rename(columns={player_col: "player_id"})
     )
+    masked_team = pbp[mask & pbp["posteam"].notna()]
     team = (
-        pbp[mask & pbp["posteam"].notna()]
-        .groupby(["posteam", "season"], dropna=True)
-        .size()
-        .reset_index(name="team_count")
+        masked_team.groupby(["posteam", "season"], dropna=True)
+        .agg(team_count=("play_id", "size"), team_games=("game_id", "nunique"))
+        .reset_index()
     )
     merged = player.merge(team, on=["posteam", "season"], how="left")
-    merged[label] = _safe_share(merged["player_count"], merged["team_count"])
+    merged["team_rate"] = _safe_share(merged["team_count"], merged["team_games"])
 
-    # A player traded mid-season appears with two teams; sum his shares so the total
-    # reflects his full-season opportunity rather than only his last stop.
-    return merged.groupby(["player_id", "season"], as_index=False)[label].sum()
+    # Total events across every team the player appeared for that season.
+    totals = merged.groupby(["player_id", "season"], as_index=False)["player_count"].sum()
+
+    # For a traded player, blend his teams' per-game rates weighted by how much of his own
+    # volume came with each, so the denominator reflects the offences he actually played in.
+    merged["weighted_rate"] = merged["team_rate"] * merged["player_count"]
+    blended = merged.groupby(["player_id", "season"], as_index=False).agg(
+        weighted_rate=("weighted_rate", "sum"), weight=("player_count", "sum")
+    )
+    blended["team_rate"] = _safe_share(blended["weighted_rate"], blended["weight"])
+
+    out = totals.merge(blended[["player_id", "season", "team_rate"]], on=["player_id", "season"])
+
+    if player_games is not None:
+        games = pd.MultiIndex.from_frame(out[["player_id", "season"]]).map(player_games)
+        out["games"] = pd.to_numeric(pd.Series(games, index=out.index), errors="coerce")
+    else:
+        out["games"] = np.nan
+    # Fall back to the team's game count when games played is unknown, which reduces to the old
+    # totals-based behaviour rather than dropping the player entirely.
+    out["games"] = out["games"].where(out["games"] > 0)
+
+    player_rate = _safe_share(out["player_count"], out["games"])
+    out[label] = _safe_share(player_rate, out["team_rate"])
+    return out[["player_id", "season", label]]
 
 
 def compute_opportunity_inputs(pbp: pd.DataFrame, weekly: pd.DataFrame) -> pd.DataFrame:
@@ -92,12 +126,20 @@ def compute_opportunity_inputs(pbp: pd.DataFrame, weekly: pd.DataFrame) -> pd.Da
     is_dropback = df["qb_dropback"].eq(1)
     is_target = df["pass_attempt"].eq(1) & df["receiver_player_id"].notna()
 
+    # Games actually played, from the same source STEP 1 uses, so both steps agree on the
+    # denominator and neither double-counts missed time.
+    player_games = None
+    if not weekly.empty and {"player_id", "season", "week"}.issubset(weekly.columns):
+        player_games = (
+            weekly.groupby(["player_id", "season"])["week"].nunique().rename("games")
+        )
+
     parts = [
-        _player_team_counts(df, "rusher_player_id", is_designed_run, "carry_share"),
-        _player_team_counts(df, "rusher_player_id", is_designed_run & in_red_zone, "rz_carry_share"),
-        _player_team_counts(df, "receiver_player_id", is_target & in_red_zone, "rz_target_share"),
-        _player_team_counts(df, "passer_player_id", is_dropback, "dropback_share"),
-        _player_team_counts(df, "passer_player_id", is_dropback & in_red_zone, "rz_pass_attempt_share"),
+        _player_team_counts(df, "rusher_player_id", is_designed_run, "carry_share", player_games),
+        _player_team_counts(df, "rusher_player_id", is_designed_run & in_red_zone, "rz_carry_share", player_games),
+        _player_team_counts(df, "receiver_player_id", is_target & in_red_zone, "rz_target_share", player_games),
+        _player_team_counts(df, "passer_player_id", is_dropback, "dropback_share", player_games),
+        _player_team_counts(df, "passer_player_id", is_dropback & in_red_zone, "rz_pass_attempt_share", player_games),
     ]
 
     out = parts[0]
