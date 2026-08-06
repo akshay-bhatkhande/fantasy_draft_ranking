@@ -6,23 +6,71 @@
     "0 = no notable camp news, -1/-2 = mirrored negatives. Multiplier is capped at +/-8%.",
     "Every entry MUST have a source; entries without one are dropped, because unsourced camp adjustments are not allowed.",
     "Players absent from this file are treated as neutral (0).",
-    "Season-ending absences belong in known_absences.csv, not here -- they are a games count, not a PPG nudge."
+    "Season-ending absences belong in known_absences.csv, not here -- they are a games count, not a PPG nudge.",
+    "",
+    "SCOPE: deliberately focused on MID-TO-LATE round picks (roughly ADP 40+, i.e. round 5 onward in a",
+    "10-team draft) plus undrafted fliers. Round 1-3 players are intentionally left neutral: their camp",
+    "situations are already well known and priced into ADP, so a camp nudge there mostly adds noise. This is",
+    "also where the multiplier does the most good -- an 8% swing moves a round-10 pick several rounds, but",
+    "barely moves a player who is going first overall regardless."
   ],
   "last_updated": "2026-08-06",
   "players": [
     {
-      "player": "Cam Skattebo",
+      "player": "Terry McLaurin",
       "score": 2,
-      "source": "Connor Hughes, SNY (via NBC Sports player news)",
+      "source": "Jeremy Fowler, ESPN (via 106.7 The Fan / Commanders Wire); Hogs Haven camp report",
+      "date": "2026-08-04",
+      "note": "Fowler: 'McLaurin looked like himself again' after a 2025 wrecked by a hold-in and injuries, and he and Jayden Daniels are visibly back on the same page. Reinstalled as the clear WR1."
+    },
+    {
+      "player": "Bucky Irving",
+      "score": 2,
+      "source": "Adam Slivon, Pewter Report; OC Zac Robinson presser (via Yahoo Sports)",
+      "date": "2026-07-31",
+      "note": "Given the most carries in Friday's practice and a full participant after an injury-hit 2025; Robinson called him 'a stud' and the blueprint has Irving shouldering the bulk of the carries with Gainwell as the receiving back."
+    },
+    {
+      "player": "Luther Burden III",
+      "score": 2,
+      "source": "Ben Johnson presser via NFL.com; Chicago Sun-Times; Shaw Local camp report",
+      "date": "2026-08-04",
+      "note": "Multiple outlets on a Year 2 breakout; HC Ben Johnson compared his competitive edge directly to Amon-Ra St. Brown. Chicago moved on from DJ Moore partly to open these targets."
+    },
+    {
+      "player": "Jordyn Tyson",
+      "score": 2,
+      "source": "Mike Triplett, New Orleans Football (via NBC Sports); Saints Wire",
+      "date": "2026-07-31",
+      "note": "Fully practising after the spring hamstring recurrence and working with the first-team offense since day one; slated as the Saints' WR2 with Shough complimenting his preparation."
+    },
+    {
+      "player": "Rashid Shaheed",
+      "score": 2,
+      "source": "Seattle Times camp notebook; Seahawks.com Day 8 observations",
       "date": "2026-08-03",
-      "note": "'Clear Skattebo is the top back' - first up in almost every running drill and handling the majority of carries. Caveat: Tracy and Singletary are the preferred passing-game options, which caps the PPR ceiling."
+      "note": "Macdonald made completing deep balls to Shaheed an explicit goal for week two of camp; he took a 55-yard TD from Darnold as the play of the day and is 'poised to take on a much bigger role' in his first full Seattle season."
+    },
+    {
+      "player": "Woody Marks",
+      "score": 2,
+      "source": "Jane Slater, NFL Network (via The Big Lead)",
+      "date": "2026-08-04",
+      "note": "Reported to split lead-back reps with David Montgomery rather than sitting behind him - a major role upgrade for a player going in the last third of drafts."
+    },
+    {
+      "player": "Denzel Boston",
+      "score": 2,
+      "source": "Sports Illustrated / OnSI Browns camp week 1 review",
+      "date": "2026-08-05",
+      "note": "'Undisputed highlight' of week one and the Browns' biggest camp winner; winning contested balls as the true X receiver Cleveland lacked, ahead of fellow rookie K.C. Concepcion."
     },
     {
       "player": "Kyler Murray",
       "score": 2,
       "source": "Blitz Sports Media camp risers roundup; NFL.com 2026 position battles",
       "date": "2026-08-05",
-      "note": "Multiple reports describe Murray as the clear leader over J.J. McCarthy in the Minnesota QB competition entering preseason."
+      "note": "Multiple reports have him as the clear leader over J.J. McCarthy for the Minnesota job - meaningful for a QB going outside the top 140."
     },
     {
       "player": "Rico Dowdle",
@@ -32,53 +80,60 @@
       "note": "Two beat writers had him as RB1 over Jaylen Warren on first-team reps, but the official Aug 5 depth chart still lists him RB2, so the role win is not clean. Kaboly projected roughly 65-70% of snaps."
     },
     {
-      "player": "Jonathon Brooks",
+      "player": "Rhamondre Stevenson",
       "score": 1,
-      "source": "Mike Kaye, The Charlotte Observer; HC Dave Canales (via FantasyPros)",
+      "source": "Camp depth-chart roundup (via NFL.com position battles coverage)",
+      "date": "2026-08-05",
+      "note": "Holding the New England lead role with TreVeyon Henderson reported as the clear RB2 behind him."
+    },
+    {
+      "player": "J.K. Dobbins",
+      "score": 1,
+      "source": "Denver camp depth-chart reporting (via camp roundups)",
+      "date": "2026-08-05",
+      "note": "Operating as the Broncos' starter with RJ Harvey behind him as RB2."
+    },
+    {
+      "player": "Tyler Warren",
+      "score": 1,
+      "source": "Yahoo Sports TE camp preview; FTN Fantasy TE tiers",
+      "date": "2026-08-05",
+      "note": "In line for a larger share of the Indianapolis passing game after Michael Pittman Jr. was traded, with no clear replacement brought in. Upside tied to Daniel Jones' health."
+    },
+    {
+      "player": "Kyle Pitts",
+      "score": 1,
+      "source": "Atlanta Journal-Constitution camp report",
       "date": "2026-07-30",
-      "note": "Took first-team reps after two ACL tears; Canales said he 'looks like the guy that I remember' and praised his speed."
+      "note": "New staff (Stefanski/Rees) leaned heavily on tight ends in Cleveland, where two TEs cleared an 11% target share; Pitts signed a three-year extension after a strong 2025 finish and the scheme fit is favourable."
     },
     {
-      "player": "Roman Wilson",
+      "player": "Colston Loveland",
       "score": 1,
-      "source": "Chris Adamski, Pittsburgh Tribune-Review (via X)",
-      "date": "2026-08-02",
-      "note": "'Roman Wilson is WR3, well ahead of Germie Bernard' four practices into camp."
-    },
-    {
-      "player": "Tetairoa McMillan",
-      "score": 1,
-      "source": "Joe Person, The Athletic; Panthers.com camp observations",
-      "date": "2026-08-05",
-      "note": "Cleared his spring foot issue and practicing in full; Canales calls him the offense's 'focal point' and is moving him into the slot more."
-    },
-    {
-      "player": "Puka Nacua",
-      "score": 1,
-      "source": "Rams.com Day 9 training camp observations",
-      "date": "2026-08-05",
-      "note": "Repeatedly cited for highlight plays through the open-practice portion of camp."
-    },
-    {
-      "player": "Bijan Robinson",
-      "score": 1,
-      "source": "ESPN 2026 hold-in tracker",
+      "source": "ChicagoBears.com camp feature",
       "date": "2026-08-04",
-      "note": "Ended his hold-in with a three-year extension ($51M guaranteed) and is back in camp, removing the holdout risk that shadowed his early summer."
+      "note": "'Picked up right where he left off' through week one after leading the Bears in receiving as a rookie; coaches describe him as a sponge, though Chicago's target competition is crowded."
     },
     {
-      "player": "Isiah Pacheco",
+      "player": "Harold Fannin Jr.",
       "score": 1,
-      "source": "ESPN hold-in tracker; Yahoo Sports",
-      "date": "2026-08-04",
-      "note": "Has taken most of the first-team RB reps in week one of camp while Jahmyr Gibbs holds in."
+      "source": "Yahoo Sports TE camp preview / Browns camp reporting",
+      "date": "2026-08-05",
+      "note": "Cleared for full participation after groin surgery and remains a focal point of the offense off 107 targets in 2025; capped by Cleveland's unresolved quarterback situation."
     },
     {
-      "player": "Trey McBride",
+      "player": "Sam LaPorta",
       "score": 1,
-      "source": "The Devy Royale NFL training camp roundup (7/21-8/01)",
-      "date": "2026-08-01",
-      "note": "'Locked and loaded as one of the focal points of the offense'; ceiling tied to Arizona QB play."
+      "source": "FTN Fantasy TE tiers; Detroit camp reporting",
+      "date": "2026-08-05",
+      "note": "Projected to benefit from new OC Drew Petzing, whose history with Trey McBride points to heavy tight end target volume."
+    },
+    {
+      "player": "Kenneth Gainwell",
+      "score": 1,
+      "source": "Adam Slivon, Pewter Report (via RotoWire)",
+      "date": "2026-07-31",
+      "note": "Being used primarily as a receiving back and building early rapport with Mayfield; led the Steelers with 73 catches in 2025 and has a defined passing-down niche in the pony package."
     },
     {
       "player": "Bhayshul Tuten",
@@ -88,25 +143,18 @@
       "note": "Coen said he expects a 'big year' from Tuten, with camp reports supporting an expanded role."
     },
     {
+      "player": "Jonathon Brooks",
+      "score": 1,
+      "source": "Mike Kaye, The Charlotte Observer; HC Dave Canales (via FantasyPros)",
+      "date": "2026-07-30",
+      "note": "Took first-team reps after two ACL tears; Canales said he 'looks like the guy that I remember' and praised his speed."
+    },
+    {
       "player": "Matthew Golden",
       "score": 1,
       "source": "PackersTalk camp week 1 stock up/stock down",
       "date": "2026-08-05",
       "note": "Consistently generating highlight plays through the first week of Green Bay camp."
-    },
-    {
-      "player": "Cyrus Allen",
-      "score": 1,
-      "source": "Blitz Sports Media camp risers roundup",
-      "date": "2026-08-05",
-      "note": "Reported as Mahomes' favourite practice target, working consistently with the first-team offense."
-    },
-    {
-      "player": "Parker Washington",
-      "score": 1,
-      "source": "Blitz Sports Media camp risers roundup",
-      "date": "2026-08-05",
-      "note": "Identified by camp reports as the quarterback's go-to receiver in Jacksonville practices."
     },
     {
       "player": "Michael Wilson",
@@ -116,25 +164,39 @@
       "note": "One of Arizona's most consistent camp performers; sharp, physical routes and building QB trust ahead of Marvin Harrison Jr."
     },
     {
+      "player": "Parker Washington",
+      "score": 1,
+      "source": "Blitz Sports Media camp risers roundup",
+      "date": "2026-08-05",
+      "note": "Identified by camp reports as the quarterback's go-to receiver in Jacksonville practices."
+    },
+    {
+      "player": "Roman Wilson",
+      "score": 1,
+      "source": "Chris Adamski, Pittsburgh Tribune-Review (via X)",
+      "date": "2026-08-02",
+      "note": "'Roman Wilson is WR3, well ahead of Germie Bernard' four practices into camp."
+    },
+    {
+      "player": "Cyrus Allen",
+      "score": 1,
+      "source": "Blitz Sports Media camp risers roundup",
+      "date": "2026-08-05",
+      "note": "Reported as Mahomes' favourite practice target, working consistently with the first-team offense."
+    },
+    {
+      "player": "Isiah Pacheco",
+      "score": 1,
+      "source": "ESPN hold-in tracker; Yahoo Sports",
+      "date": "2026-08-04",
+      "note": "Has taken most of the first-team RB reps in week one of camp while Jahmyr Gibbs holds in."
+    },
+    {
       "player": "Jake Tonges",
       "score": 1,
       "source": "Yahoo Sports NFL training camp injury report",
       "date": "2026-08-05",
       "note": "In line for early-season TE work with George Kittle opening camp on the PUP list."
-    },
-    {
-      "player": "Jahmyr Gibbs",
-      "score": -1,
-      "source": "ESPN 2026 hold-in tracker; Yahoo Sports",
-      "date": "2026-08-04",
-      "note": "Contract hold-in: missed a sixth straight practice as of Aug 4 and said only 'time will tell' on his return. Contract-driven rather than a performance concern, and he remains the clear-cut Detroit RB1."
-    },
-    {
-      "player": "Jaylen Warren",
-      "score": -1,
-      "source": "Mark Kaboly, 93.7 The Fan; Chris Adamski, Pittsburgh Tribune-Review",
-      "date": "2026-08-02",
-      "note": "Lost first-team reps to Rico Dowdle early in camp, though Pittsburgh's official Aug 5 depth chart still lists Warren as RB1, so the negative is partly offset."
     },
     {
       "player": "James Conner",
@@ -158,11 +220,32 @@
       "note": "Torn ACL in last season's divisional round; opened 2026 camp on the PUP list."
     },
     {
-      "player": "Tua Tagovailoa",
+      "player": "David Montgomery",
       "score": -1,
-      "source": "ESPN (via FantasyPros camp fallers)",
-      "date": "2026-07-30",
-      "note": "Slated as Atlanta's Week 1 starter but dealing with an undisclosed back 'flare-up' limiting his camp work."
+      "source": "Jane Slater, NFL Network (via The Big Lead)",
+      "date": "2026-08-04",
+      "note": "Expected to split lead-back reps with Woody Marks rather than inherit the workhorse role many assumed after the trade to Houston. Should keep short-yardage and goal-line work."
+    },
+    {
+      "player": "TreVeyon Henderson",
+      "score": -1,
+      "source": "Camp depth-chart roundup (via NFL.com position battles coverage)",
+      "date": "2026-08-05",
+      "note": "Reported as the clear RB2 behind Rhamondre Stevenson in New England."
+    },
+    {
+      "player": "RJ Harvey",
+      "score": -1,
+      "source": "Denver camp depth-chart reporting (via camp roundups)",
+      "date": "2026-08-05",
+      "note": "Functioning as RB2 behind J.K. Dobbins, with Coleman/McLaughlin/Badie competing beneath him."
+    },
+    {
+      "player": "Quinshon Judkins",
+      "score": -1,
+      "source": "Camp depth-chart roundup (via NFL.com position battles coverage)",
+      "date": "2026-08-05",
+      "note": "Competing for touches inside a Cleveland rotation rather than holding a clear lead-back role."
     },
     {
       "player": "Marvin Harrison Jr.",
@@ -172,11 +255,25 @@
       "note": "Making plays but drops and inconsistency persist; Michael Wilson currently looks like the more dependable option for Arizona."
     },
     {
-      "player": "Christian Kirk",
+      "player": "K.C. Concepcion",
       "score": -1,
-      "source": "Roto Street Journal 2026 camp news tracker (8/1-8/3)",
-      "date": "2026-08-03",
-      "note": "Calf injury; missing his chance to win a starting spot and build rapport with Brock Purdy."
+      "source": "Sports Illustrated / OnSI Browns camp week 1 review",
+      "date": "2026-08-05",
+      "note": "Contested-catch and consistency issues showing up in camp while fellow rookie Denzel Boston has clearly outperformed him."
+    },
+    {
+      "player": "Alec Pierce",
+      "score": -1,
+      "source": "Yahoo Sports NFL training camp injury report",
+      "date": "2026-08-05",
+      "note": "Ankle injury; opened camp on the PUP list, though expected to be activated within roughly a week and to play Week 1."
+    },
+    {
+      "player": "Tucker Kraft",
+      "score": -1,
+      "source": "Yahoo Sports NFL training camp injury report",
+      "date": "2026-08-05",
+      "note": "Off the PUP list and practising again after a mid-2025 torn ACL, but reported to still have 'a lot of work to do' before Week 1."
     },
     {
       "player": "Mike Evans",
@@ -184,6 +281,20 @@
       "source": "Roto Street Journal 2026 camp news tracker (8/1-8/3)",
       "date": "2026-08-03",
       "note": "Quad injury and on the camp injury list, against a long history of hamstring-related absences."
+    },
+    {
+      "player": "Jaylen Warren",
+      "score": -1,
+      "source": "Mark Kaboly, 93.7 The Fan; Chris Adamski, Pittsburgh Tribune-Review",
+      "date": "2026-08-02",
+      "note": "Lost first-team reps to Rico Dowdle early in camp, though Pittsburgh's official Aug 5 depth chart still lists Warren as RB1, so the negative is partly offset."
+    },
+    {
+      "player": "Christian Kirk",
+      "score": -1,
+      "source": "Roto Street Journal 2026 camp news tracker (8/1-8/3)",
+      "date": "2026-08-03",
+      "note": "Calf injury; missing his chance to win a starting spot and build rapport with Brock Purdy."
     },
     {
       "player": "Jordan James",
@@ -207,18 +318,11 @@
       "note": "Broke his nose in practice on Aug 3 and will miss time, opening reps for other Detroit backs."
     },
     {
-      "player": "Alec Pierce",
+      "player": "Tua Tagovailoa",
       "score": -1,
-      "source": "Yahoo Sports NFL training camp injury report",
-      "date": "2026-08-05",
-      "note": "Ankle injury; opened camp on the PUP list, though expected to be activated within roughly a week and to play Week 1."
-    },
-    {
-      "player": "Tucker Kraft",
-      "score": -1,
-      "source": "Yahoo Sports NFL training camp injury report",
-      "date": "2026-08-05",
-      "note": "Off the PUP list and practising again after a mid-2025 torn ACL, but reported to still have 'a lot of work to do' before Week 1."
+      "source": "ESPN (via FantasyPros camp fallers)",
+      "date": "2026-07-30",
+      "note": "Slated as Atlanta's Week 1 starter but dealing with an undisclosed back 'flare-up' limiting his camp work."
     }
   ]
 }
