@@ -87,8 +87,9 @@ def test_replacement_level_is_the_player_below_the_starter_count():
         # count is a 0-based index here, so it addresses the (count+1)-th player.
         assert levels[pos] == pytest.approx(float(pool[count]))
 
-    # And the replacement player himself has VORP of exactly zero.
+    # And the replacement player himself has raw VORP of exactly zero (draft scale leaves 0 alone).
     rb = df[df["position"] == "RB"].sort_values("final_projected_season_points", ascending=False)
+    assert rb.iloc[counts["RB"]]["vorp_raw"] == pytest.approx(0.0, abs=1e-9)
     assert rb.iloc[counts["RB"]]["vorp"] == pytest.approx(0.0, abs=1e-9)
 
 

@@ -11,6 +11,9 @@ which has nothing to do with durability.
 Games missed are recency-weighted 55/30/15 like STEP 1, and weighted more heavily for
 recurring soft-tissue injuries (hamstring, groin, calf) than for one-off trauma, because soft
 tissue issues recur at a statistically higher rate.
+
+Short careers are shrunk toward a league-health prior so one injury-hit season on a 1-2 year
+résumé cannot fully lock High the way a long chronic record can.
 """
 
 from __future__ import annotations
@@ -21,6 +24,8 @@ import pandas as pd
 from config import weights as W
 
 OUT_STATUSES = {"Out", "Doubtful", "Injured Reserve", "IR", "PUP"}
+
+_BUCKET_RANK = {"Low": 0, "Med": 1, "High": 2}
 
 
 def _injury_severity_weight(text: str) -> tuple[float, str]:
@@ -37,6 +42,37 @@ def _injury_severity_weight(text: str) -> tuple[float, str]:
     return W.UNKNOWN_INJURY_WEIGHT, "other"
 
 
+def _bucket_from_score(score: float) -> str:
+    if score < W.INJURY_RISK_LOW_MAX:
+        return "Low"
+    if score <= W.INJURY_RISK_MED_MAX:
+        return "Med"
+    return "High"
+
+
+def shrink_injury_risk_score(observed: float, seasons: int) -> float:
+    """Pull a short-sample miss rate toward the league-health prior.
+
+        score = (n / (n + k)) * observed + (k / (n + k)) * prior
+    """
+    n = max(float(seasons), 0.0)
+    k = float(W.INJURY_RISK_PRIOR_STRENGTH)
+    prior = float(W.INJURY_RISK_PRIOR)
+    if n + k <= 0:
+        return float(prior)
+    return (n / (n + k)) * float(observed) + (k / (n + k)) * prior
+
+
+def apply_injury_bucket_cap(bucket: str, seasons: int) -> str:
+    """High requires enough seasons; shorter résumés cap at Med (or configured cap)."""
+    if seasons >= W.INJURY_RISK_MIN_SEASONS_FOR_HIGH:
+        return bucket
+    cap = W.INJURY_RISK_BUCKET_CAP_BEFORE_HIGH
+    if _BUCKET_RANK.get(bucket, 0) <= _BUCKET_RANK.get(cap, 1):
+        return bucket
+    return cap
+
+
 def compute_injury_history(
     weekly: pd.DataFrame,
     injuries: pd.DataFrame,
@@ -47,7 +83,8 @@ def compute_injury_history(
     """Per-player injury history, bucketed Low/Med/High.
 
     Returns player_id, injury_risk_score (severity-weighted, recency-weighted share of games
-    missed), injury_risk_bucket, expected_games_missed_from_bucket, and a description.
+    missed, then shrunk toward a prior when the sample is small), injury_risk_bucket,
+    expected_games_missed_from_bucket, and a description.
     """
     recency_weights = recency_weights or W.RECENCY_WEIGHTS
     cols = [
@@ -117,16 +154,22 @@ def compute_injury_history(
         hist["injury_weeks_flagged"] > 0, hist["absences"], 0.0
     )
 
-    severity = hist["primary"].map(lambda t: _injury_severity_weight(t)[0])
-    category = hist["primary"].map(lambda t: _injury_severity_weight(t)[1])
-    hist["severity_weight"] = severity
-    hist["injury_category"] = category
-    hist["weighted_missed"] = hist["injury_games_missed"] * hist["severity_weight"]
-
     hist["seasons_ago"] = target_season - hist["season"]
     hist = hist[hist["seasons_ago"].isin(recency_weights.keys())].copy()
     if hist.empty:
         return pd.DataFrame(columns=cols)
+
+    seasons_per_player = hist.groupby("player_id")["season"].transform("nunique")
+    raw_severity = hist["primary"].map(lambda t: _injury_severity_weight(t)[0])
+    category = hist["primary"].map(lambda t: _injury_severity_weight(t)[1])
+    # Severity multipliers amplify noise on short careers; use 1.0 until enough seasons.
+    hist["severity_weight"] = np.where(
+        seasons_per_player >= W.INJURY_RISK_MIN_SEASONS_FOR_SEVERITY,
+        raw_severity,
+        1.0,
+    )
+    hist["injury_category"] = category
+    hist["weighted_missed"] = hist["injury_games_missed"] * hist["severity_weight"]
     hist["w"] = hist["seasons_ago"].map(recency_weights).astype(float)
 
     # Recency-weighted share of games missed: weighted missed games over weighted team games.
@@ -135,7 +178,7 @@ def compute_injury_history(
     agg = hist.groupby("player_id").apply(
         lambda g: pd.Series(
             {
-                "injury_risk_score": float(
+                "observed_injury_risk_score": float(
                     (g["weighted_missed"] * g["applied_w"]).sum()
                     / max((g["team_games"] * g["applied_w"]).sum(), 1e-9)
                 ),
@@ -147,24 +190,33 @@ def compute_injury_history(
         include_groups=False,
     ).reset_index()
 
-    def _bucket(score: float) -> str:
-        if score < W.INJURY_RISK_LOW_MAX:
-            return "Low"
-        if score <= W.INJURY_RISK_MED_MAX:
-            return "Med"
-        return "High"
-
-    agg["injury_risk_bucket"] = agg["injury_risk_score"].map(_bucket)
+    agg["injury_risk_score"] = [
+        shrink_injury_risk_score(obs, int(n))
+        for obs, n in zip(agg["observed_injury_risk_score"], agg["seasons"])
+    ]
+    uncapped = agg["injury_risk_score"].map(_bucket_from_score)
+    agg["injury_risk_bucket"] = [
+        apply_injury_bucket_cap(b, int(n)) for b, n in zip(uncapped, agg["seasons"])
+    ]
     agg["expected_games_missed_from_bucket"] = agg["injury_risk_bucket"].map(
         W.INJURY_RISK_EXPECTED_GAMES_MISSED
     )
 
     def _note(row) -> str:
+        observed = float(row["observed_injury_risk_score"])
+        shrunk = float(row["injury_risk_score"])
         base = (
-            f"Injury risk {row['injury_risk_bucket']}: {row['injury_risk_score'] * 100:.1f}% "
+            f"Injury risk {row['injury_risk_bucket']}: {shrunk * 100:.1f}% "
             f"severity-weighted games missed over {int(row['seasons'])} season(s) "
             f"({row['raw_missed']:.0f} games)"
         )
+        if abs(shrunk - observed) > 1e-6 or int(row["seasons"]) < W.INJURY_RISK_MIN_SEASONS_FOR_HIGH:
+            base += (
+                f"; small-sample shrink from {observed * 100:.1f}% observed "
+                f"(prior {W.INJURY_RISK_PRIOR * 100:.0f}%, k={W.INJURY_RISK_PRIOR_STRENGTH})"
+            )
+            if int(row["seasons"]) < W.INJURY_RISK_MIN_SEASONS_FOR_HIGH:
+                base += f"; High capped until {W.INJURY_RISK_MIN_SEASONS_FOR_HIGH} seasons"
         if row["categories"]:
             base += f"; injuries: {row['categories']}"
             if "soft tissue" in row["categories"]:

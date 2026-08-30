@@ -5,9 +5,11 @@
     Base Projected PPG comes from the draft-capital rookie baseline instead.
 
 3b  Final Projected PPG = Base Projected PPG
-                          x Contract-Year x Age-Curve x Camp-Buzz x Team-Penalty
-    Applied in exactly that order. The team penalty is a personal-preference adjustment and is
-    disabled unless BIAS_TEAM is set in config/league.py, in which case it resolves to 1.00.
+                          x Contract-Year x Age-Curve x Camp-Buzz
+                          x Team-Penalty x Player-Fade x RB-Workload
+    Applied in exactly that order. Team and player fades are personal-preference adjustments
+    and resolve to 1.00 when disabled / unmatched. RB-Workload uses expected offensive snap %
+    (committee / bellcow estimate) and is 1.00 for non-RBs.
 
 3c  Expected Games Played = 17 - known current-season games missed - probabilistic games
     from the injury-risk bucket. A literal games count, never a multiplier on PPG.
@@ -25,8 +27,10 @@ import pandas as pd
 
 from config import weights as W
 from config.league import LeagueConfig
+from ..data.sleeper import normalize_name
 from ..features import curves as C
 from ..features.risk import expected_games_played
+from ..features.rb_role import rb_workload_multiplier
 
 
 def base_projected_ppg(
@@ -93,17 +97,24 @@ def base_projected_ppg(
     return out
 
 
-def camp_buzz_multiplier(score) -> float:
+def camp_buzz_multiplier(score, limited_sample: bool = False) -> float:
     """Camp-Buzz Multiplier from a -2..+2 score, hard-capped at +/-8%.
 
     The cap exists because camp buzz is the least statistically grounded input: it should
     nudge a player at most about one tier, never leapfrog him several tiers on its own.
+
+    Limited-sample players (one season / no usable history) keep only a fraction of the
+    deviation from 1.0 — same philosophy as the RB workload limited-sample shrink.
     """
     if score is None or pd.isna(score):
         return 1.00
     s = int(max(-2, min(2, round(float(score)))))
-    mult = W.CAMP_BUZZ_MULTIPLIERS.get(s, 1.00)
-    return float(min(max(mult, 1 - W.CAMP_BUZZ_MAX_ABS_EFFECT), 1 + W.CAMP_BUZZ_MAX_ABS_EFFECT))
+    mult = float(W.CAMP_BUZZ_MULTIPLIERS.get(s, 1.00))
+    mult = float(min(max(mult, 1 - W.CAMP_BUZZ_MAX_ABS_EFFECT), 1 + W.CAMP_BUZZ_MAX_ABS_EFFECT))
+    if limited_sample and mult != 1.0:
+        shrink = float(W.CAMP_BUZZ_LIMITED_SAMPLE_SHRINK)
+        mult = 1.0 + (mult - 1.0) * shrink
+    return float(mult)
 
 
 def apply_multipliers(
@@ -144,7 +155,15 @@ def apply_multipliers(
     out["age_curve_note"] = [a[1] for a in age_results]
 
     # --- Camp-Buzz multiplier ----------------------------------------------------------
-    out["camp_buzz_multiplier"] = out["camp_buzz_score"].map(camp_buzz_multiplier)
+    limited = (
+        out["limited_sample"].fillna(False).astype(bool)
+        if "limited_sample" in out.columns
+        else pd.Series(False, index=out.index)
+    )
+    out["camp_buzz_multiplier"] = [
+        camp_buzz_multiplier(score, limited_sample=bool(lim))
+        for score, lim in zip(out["camp_buzz_score"], limited)
+    ]
 
     # --- Personal-preference team penalty ----------------------------------------------
     if apply_team_bias and league.bias_team:
@@ -155,12 +174,47 @@ def apply_multipliers(
         out["team_bias_multiplier"] = 1.00
         out["team_bias_flag"] = "N"
 
+    # --- Personal-preference player fades ----------------------------------------------
+    fade_mult = pd.Series(1.00, index=out.index, dtype=float)
+    fade_flag = pd.Series("N", index=out.index, dtype=object)
+    fade_reason = pd.Series("", index=out.index, dtype=object)
+    if apply_team_bias and league.player_fades:
+        by_key = {
+            normalize_name(name): spec
+            for name, spec in league.player_fades.items()
+        }
+        keys = out["name_key"] if "name_key" in out.columns else out["player_name"].map(normalize_name)
+        for idx, key in keys.items():
+            spec = by_key.get(key)
+            if not spec:
+                continue
+            fade_mult.at[idx] = float(spec.get("multiplier", 1.0))
+            fade_flag.at[idx] = "Y"
+            fade_reason.at[idx] = str(spec.get("reason", "Personal fade"))
+    out["player_fade_multiplier"] = fade_mult
+    out["player_fade_flag"] = fade_flag
+    out["player_fade_reason"] = fade_reason
+
+    # --- RB workload from expected snap % (committee / bellcow) -----------------------
+    camp_m = pd.to_numeric(out["camp_buzz_multiplier"], errors="coerce").fillna(1.0)
+    snaps = (
+        out["expected_snap_pct"]
+        if "expected_snap_pct" in out.columns
+        else pd.Series(np.nan, index=out.index)
+    )
+    out["rb_workload_multiplier"] = [
+        rb_workload_multiplier(snap, pos, limited_sample=bool(lim), camp_buzz_multiplier=float(camp))
+        for snap, pos, lim, camp in zip(snaps, out["position"], limited, camp_m)
+    ]
+
     out["final_projected_ppg"] = (
         pd.to_numeric(out["base_projected_ppg"], errors="coerce")
         * out["contract_year_multiplier"]
         * out["age_curve_multiplier"]
         * out["camp_buzz_multiplier"]
         * out["team_bias_multiplier"]
+        * out["player_fade_multiplier"]
+        * out["rb_workload_multiplier"]
     )
     return out
 

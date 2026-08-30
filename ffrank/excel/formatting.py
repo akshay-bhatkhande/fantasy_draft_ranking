@@ -36,7 +36,10 @@ MAIN_COLUMNS: tuple[Column, ...] = (
     Column("final_projected_ppg", "Final Projected PPG (Step 3b)", 12, "num2"),
     Column("expected_games_played", "Expected Games Played (Step 3c)", 12, "num1"),
     Column("final_projected_season_points", "Final Projected Season Points (Step 3d)", 13, "num1"),
-    Column("vorp", "VORP (Step 4c - the cross-position number)", 12, "num1"),
+    Column("vorp", "VORP (Step 4d - draft-adjusted, cross-position rank key)", 12, "num1"),
+    Column("vorp_raw", "VORP Raw (Step 4c - points minus replacement)", 12, "num1"),
+    Column("vorp_draft_scale", "VORP Draft Scarcity Scale (effective vs raw)", 10, "num2"),
+    Column("vorp_wait_penalty", "VORP Wait Penalty (QB/TE draft scarcity)", 10, "num1"),
     Column("replacement_level_points", "Replacement Level used (Step 4b)", 12, "num1"),
     Column("starter_count_at_position", "Starter Count at Position (Step 4a)", 10, "int"),
     Column("floor", "Floor (20th pct weekly)", 10, "num1"),
@@ -48,6 +51,14 @@ MAIN_COLUMNS: tuple[Column, ...] = (
     Column("adp_stdev", "ADP source spread / variance", 11, "num1"),
     Column("market_disagreement_flag", "Market Disagreement", 16, "wrap"),
     Column("injury_risk_bucket", "Injury Risk Bucket", 10, "center"),
+    Column("expected_snap_pct", "Expected Snap % (RB role estimate)", 11, "num1"),
+    Column("rb_workload_multiplier", "RB Workload Multiplier (from expected snap %)", 11, "num3"),
+    Column("rb_role_label", "RB Role Label", 18, "wrap"),
+    Column("rb_committee_flag", "RB Committee Flag", 14, "wrap"),
+    Column("rb_team_structure", "Team RB Structure (prior season)", 14, "wrap"),
+    Column("hist_snap_pct", "Historical Snap % (recency-weighted)", 11, "num1"),
+    Column("carry_share_pct", "Carry Share % (recency-weighted)", 11, "num1"),
+    Column("rb_committee_note", "RB Committee / Snap Audit", 44, "wrap"),
     Column("expected_games_missed_from_bucket", "Expected Games Missed (from bucket)", 11, "num1"),
     Column("known_games_missed", "Known Current-Season Games Missed", 11, "num1"),
     Column("known_absence_source", "Known Absence Source", 22, "wrap"),
@@ -62,6 +73,9 @@ MAIN_COLUMNS: tuple[Column, ...] = (
     Column("rookie_adjustment_applied", "Rookie Adjustment (share of position mean)", 11, "num3"),
     Column("team_bias_flag", "Team Penalty Flag (Y/N)", 9, "center"),
     Column("team_bias_multiplier", "Team Penalty Multiplier", 10, "num3"),
+    Column("player_fade_flag", "Player Fade Flag (Y/N)", 9, "center"),
+    Column("player_fade_multiplier", "Player Fade Multiplier", 10, "num3"),
+    Column("player_fade_reason", "Player Fade Reason", 36, "wrap"),
     Column("pre_penalty_vorp", "Pre-Penalty VORP", 11, "num1"),
     Column("pre_penalty_overall_rank", "Pre-Penalty Overall Rank", 11, "int"),
     Column("consensus_rank", "Consensus Rank (Step 5, sanity check only)", 11, "int"),
@@ -75,7 +89,7 @@ MAIN_COLUMNS: tuple[Column, ...] = (
     Column("notes", "Notes / Sourcing", 90, "wrap"),
 )
 
-# Extra columns shown only on the per-slot tabs.
+# Extra columns shown only on the per-slot / scenario tabs.
 SLOT_EXTRA_COLUMNS: tuple[Column, ...] = (
     Column("slot_adjusted_tier", "Slot-Adjusted Tier (NOT the global Tier)", 12, "int"),
     Column("likely_available_at_next_pick", "Likely Available at Your Next Pick", 16, "center"),
@@ -83,19 +97,36 @@ SLOT_EXTRA_COLUMNS: tuple[Column, ...] = (
     Column("realistic_target_pick", "Realistic Target Pick #", 11, "int"),
 )
 
-# Columns that only make sense when a personal-preference team penalty is switched on. With no
-# penalised team they would be a constant "N", a constant 1.000, and two exact duplicates of
-# VORP and Overall Rank, so they are dropped rather than shipped as dead weight.
+SCENARIO_EXTRA_COLUMNS: tuple[Column, ...] = (
+    Column("scenario_gone", "Already Drafted in This Scenario (Y/N)", 12, "center"),
+) + SLOT_EXTRA_COLUMNS
+
+# Columns that only make sense when a personal-preference penalty is switched on.
 TEAM_PENALTY_COLUMN_KEYS: frozenset[str] = frozenset(
-    {"team_bias_flag", "team_bias_multiplier", "pre_penalty_vorp", "pre_penalty_overall_rank"}
+    {"team_bias_flag", "team_bias_multiplier"}
+)
+PLAYER_FADE_COLUMN_KEYS: frozenset[str] = frozenset(
+    {"player_fade_flag", "player_fade_multiplier", "player_fade_reason"}
+)
+PRE_PENALTY_COLUMN_KEYS: frozenset[str] = frozenset(
+    {"pre_penalty_vorp", "pre_penalty_overall_rank"}
 )
 
 
-def main_columns(include_team_penalty: bool) -> tuple[Column, ...]:
-    """Main Rankings columns, omitting the team-penalty block when no team is penalised."""
-    if include_team_penalty:
-        return MAIN_COLUMNS
-    return tuple(c for c in MAIN_COLUMNS if c.key not in TEAM_PENALTY_COLUMN_KEYS)
+def main_columns(
+    *,
+    include_team_penalty: bool = False,
+    include_player_fade: bool = False,
+) -> tuple[Column, ...]:
+    """Main Rankings columns, omitting inactive personal-preference blocks."""
+    drop: set[str] = set()
+    if not include_team_penalty:
+        drop |= TEAM_PENALTY_COLUMN_KEYS
+    if not include_player_fade:
+        drop |= PLAYER_FADE_COLUMN_KEYS
+    if not (include_team_penalty or include_player_fade):
+        drop |= PRE_PENALTY_COLUMN_KEYS
+    return tuple(c for c in MAIN_COLUMNS if c.key not in drop)
 
 
 KDST_COLUMNS: tuple[Column, ...] = (
@@ -192,6 +223,13 @@ def apply_flag_formatting(worksheet, workbook, columns, n_rows: int, first_data_
         worksheet.conditional_format(*rng, {"type": "cell", "criteria": "==", "value": '"Med"', "format": amber})
         worksheet.conditional_format(*rng, {"type": "cell", "criteria": "==", "value": '"Low"', "format": green})
 
+    rng = col_range("rb_committee_flag")
+    if rng:
+        worksheet.conditional_format(*rng, {"type": "cell", "criteria": "==", "value": '"Committee likely"', "format": red})
+        worksheet.conditional_format(*rng, {"type": "cell", "criteria": "==", "value": '"Lean committee"', "format": amber})
+        worksheet.conditional_format(*rng, {"type": "cell", "criteria": "==", "value": '"Lean bellcow"', "format": green})
+        worksheet.conditional_format(*rng, {"type": "cell", "criteria": "==", "value": '"Bellcow likely"', "format": green})
+
     rng = col_range("camp_buzz_flag")
     if rng:
         worksheet.conditional_format(*rng, {"type": "cell", "criteria": "==", "value": '"Riser"', "format": green})
@@ -202,6 +240,12 @@ def apply_flag_formatting(worksheet, workbook, columns, n_rows: int, first_data_
     rng = col_range("team_bias_flag")
     if rng:
         worksheet.conditional_format(*rng, {"type": "cell", "criteria": "==", "value": '"Y"', "format": orange})
+    rng = col_range("player_fade_flag")
+    if rng:
+        worksheet.conditional_format(*rng, {"type": "cell", "criteria": "==", "value": '"Y"', "format": orange})
+    rng = col_range("scenario_gone")
+    if rng:
+        worksheet.conditional_format(*rng, {"type": "cell", "criteria": "==", "value": '"Y"', "format": red})
 
     rng = col_range("contract_year_flag")
     if rng:

@@ -14,7 +14,12 @@ Z-Score, Base Projected PPG, or Final Projected Season Points -- only via VORP.
     below the starter count at that position. Surfaced in a labelled column so the VORP
     arithmetic is auditable in place.
 
-4c  VORP = player's Final Projected Season Points - his position's Replacement Level.
+4c  Raw VORP = player's Final Projected Season Points - his position's Replacement Level.
+
+4d  Draft-scarcity adjustment (optional, config-driven): positive raw VORP at wait-on
+    positions (typically QB in 1QB leagues, and TE) is scaled down by position rank so mid-tier
+    QB/TE do not outrank WR2-4 / RB2-4. Raw VORP stays in `vorp_raw` for audit; `vorp` is what
+    Overall Rank / tiers / pick tabs use.
 
 Because VORP subtracts each position's own baseline, every player's value becomes the same
 unit: points better than a freely available replacement at their position. This is the only
@@ -78,13 +83,71 @@ def replacement_levels(
     return levels
 
 
+def _tier_lookup(table: dict, position: str, position_rank: int | float, default: float) -> float:
+    tiers = (table or {}).get(position)
+    if not tiers:
+        return default
+    if position_rank is None or (isinstance(position_rank, float) and np.isnan(position_rank)):
+        return default
+    rank = int(position_rank)
+    for max_rank, value in tiers:
+        if rank <= int(max_rank):
+            return float(value)
+    return float(tiers[-1][1])
+
+
+def draft_wait_penalty(position: str, position_rank: int | float) -> float:
+    """Points subtracted after the ceiling, for wait-on positions (QB/TE)."""
+    return _tier_lookup(getattr(W, "VORP_DRAFT_WAIT_PENALTIES", None) or {}, position, position_rank, 0.0)
+
+
+def draft_vorp_ceiling(position: str, position_rank: int | float) -> float | None:
+    """Optional cap on raw VORP before the wait penalty (elite TE/QB draft windows)."""
+    table = getattr(W, "VORP_DRAFT_VORP_CEILINGS", None) or {}
+    tiers = table.get(position)
+    if not tiers:
+        return None
+    if position_rank is None or (isinstance(position_rank, float) and np.isnan(position_rank)):
+        return None
+    rank = int(position_rank)
+    for max_rank, value in tiers:
+        if rank <= int(max_rank):
+            return float(value)
+    return None
+
+
+def apply_draft_scarcity_vorp(raw_vorp: pd.Series, position: pd.Series, position_rank: pd.Series) -> tuple[pd.Series, pd.Series]:
+    """Apply ceilings + wait penalties; monotone within a position.
+
+    Returns (adjusted_vorp, effective_scale_vs_raw) for workbook audit columns.
+    """
+    ceilings = []
+    penalties = []
+    for pos, rank in zip(position.tolist(), position_rank.tolist()):
+        ceilings.append(draft_vorp_ceiling(pos, rank))
+        penalties.append(draft_wait_penalty(pos, rank))
+    ceilings_s = pd.Series(ceilings, index=raw_vorp.index)
+    penalties_s = pd.Series(penalties, index=raw_vorp.index, dtype=float)
+
+    raw = pd.to_numeric(raw_vorp, errors="coerce")
+    capped = raw.copy()
+    has_cap = ceilings_s.notna()
+    capped.loc[has_cap] = np.minimum(raw.loc[has_cap], ceilings_s.loc[has_cap].astype(float))
+    adjusted = capped - penalties_s
+
+    scales = pd.Series(1.0, index=raw_vorp.index, dtype=float)
+    pos_mask = raw > 1e-9
+    scales.loc[pos_mask] = (adjusted.loc[pos_mask] / raw.loc[pos_mask]).clip(upper=1.0)
+    return adjusted, scales
+
+
 def compute_vorp(
     df: pd.DataFrame,
     league: LeagueConfig,
     points_col: str = POINTS_COL,
     vorp_col: str = "vorp",
 ) -> pd.DataFrame:
-    """STEP 4c: VORP, plus Overall Rank, Position Rank and the auditable replacement level."""
+    """STEP 4c-4d: raw VORP, draft-scarcity adjustment, Overall/Position Rank, replacement level."""
     out = df.copy()
     counts = starter_counts(league)
     levels = replacement_levels(out, league, points_col=points_col)
@@ -94,17 +157,19 @@ def compute_vorp(
     out["replacement_player_rank"] = out["position"].map(
         {pos: count + 1 for pos, count in counts.items()}
     )
-    out[vorp_col] = pd.to_numeric(out[points_col], errors="coerce") - out["replacement_level_points"]
-
-    # Overall Rank: sort ALL players by VORP descending. This is the only cross-position sort.
-    out["overall_rank"] = out[vorp_col].rank(ascending=False, method="min").astype("Int64")
-
-    # Position Rank: by Final Projected Season Points within the position. Note this gives an
-    # order identical to sorting by VORP within a position, since replacement level is a
-    # constant subtracted from everyone at that position -- so it needs no separate math.
+    # Position Rank from projected points first — scarcity keys off it, and within a
+    # position it matches raw-VORP order (replacement is a constant).
     out["position_rank"] = (
         out.groupby("position")[points_col].rank(ascending=False, method="min").astype("Int64")
     )
+    out["vorp_raw"] = pd.to_numeric(out[points_col], errors="coerce") - out["replacement_level_points"]
+    adjusted, scales = apply_draft_scarcity_vorp(out["vorp_raw"], out["position"], out["position_rank"])
+    out[vorp_col] = adjusted
+    out["vorp_draft_scale"] = scales
+    out["vorp_wait_penalty"] = out["vorp_raw"] - out[vorp_col]
+
+    # Overall Rank: sort ALL players by draft-adjusted VORP. This is the only cross-position sort.
+    out["overall_rank"] = out[vorp_col].rank(ascending=False, method="min").astype("Int64")
     return out
 
 

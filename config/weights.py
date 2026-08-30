@@ -163,10 +163,48 @@ POSITION_POOL_SIZES: dict[str, int] = {"QB": 32, "RB": 40, "WR": 60, "TE": 24}
 # Players below this share of team offensive snaps are excluded from the pool entirely.
 POSITION_POOL_MIN_SNAP_SHARE: dict[str, float] = {"QB": 0.25, "RB": 0.10, "WR": 0.10, "TE": 0.10}
 
+# --- RB committee / expected snap % (feeds STEP 3b workload multiplier for RBs) --------
+# Depth-chart priors for offensive snap share when the backfield looks like a committee.
+RB_DEPTH_SNAP_PRIORS_COMMITTEE: dict[int, float] = {1: 0.55, 2: 0.32, 3: 0.12, 4: 0.06}
+# Depth-chart priors when the team historically concentrates RB touches (bell-cow offense).
+RB_DEPTH_SNAP_PRIORS_BELLCOW: dict[int, float] = {1: 0.70, 2: 0.22, 3: 0.08, 4: 0.04}
+# Team last-season top-RB snap share at/above this => treat as bell-cow structure.
+RB_TEAM_BELLCOW_TOP_SNAP = 0.60
+# Team last-season top-RB snap share below this (with a live #2) => committee structure.
+RB_TEAM_COMMITTEE_TOP_SNAP = 0.52
+# Minimum offensive snaps in a game for that game to count toward a player's snap-share
+# average. Low-snap ramp-up / injury-exit weeks otherwise pull a featured back toward a
+# false "committee" mean (e.g. Skattebo's 12% debut and 21% exit week).
+RB_SNAP_MIN_SNAPS_FOR_GAME = 15
+# Soft camp adjustments to expected snap share (absolute fraction).
+RB_CAMP_SNAP_BUMP: dict[int, float] = {2: 0.05, 1: 0.03, 0: 0.0, -1: -0.03, -2: -0.05}
+# When a camp note names an explicit snap %, blend that much toward the parsed value.
+RB_CAMP_SNAP_NOTE_BLEND = 0.55
+# STEP 3b: RB Final PPG *= clip(expected_snap_frac / par, lo, hi). Par ≈ typical RB1 snap
+# share so bellcows get a modest lift and true committee backs get discounted.
+RB_WORKLOAD_PAR_SNAP = 0.60
+RB_WORKLOAD_MULT_BOUNDS = (0.80, 1.04)
+# Limited-sample RBs (1 season / thin history): only keep this fraction of the workload
+# deviation from 1.0 so a half-season feature role cannot leapfrog the board.
+RB_WORKLOAD_LIMITED_SAMPLE_SHRINK = 0.40
+# When Camp-Buzz is already lifting PPG (>1.0), keep only this fraction of any workload
+# lift above 1.0 — camp also bumps expected snaps, so full stacking double-counts.
+RB_WORKLOAD_CAMP_LIFT_SHRINK = 0.50
+# In-season snap erosion: when a lead back's share falls late in the prior season and the
+# #2 back's concurrent share rises, blend toward end-of-season snaps instead of the full-year
+# or cross-season average (e.g. Kyren Williams / Blake Corum 2025).
+RB_SNAP_TREND_EARLY_WEEKS = 6
+RB_SNAP_TREND_LATE_WEEKS = 6
+RB_SNAP_TREND_RB2_RISE_MIN = 0.08
+RB_SNAP_TREND_RB1_FALL_MIN = 0.05
+RB_SNAP_TREND_PLAYER_DECLINE_MIN = 0.05
+RB_SNAP_TREND_RECENT_BLEND = 0.70
+
 
 # ======================================================================================
 # STEP 3b -- Risk multipliers, applied in this order:
-#            Contract-Year x Age-Curve x Camp-Buzz x Team-Penalty
+#            Contract-Year x Age-Curve x Camp-Buzz x Team-Penalty x Player-Fade
+#            x RB-Workload (expected snap %; RBs only)
 #            (the team penalty is a personal preference and is currently disabled --
 #             see BIAS_TEAM in config/league.py)
 # ======================================================================================
@@ -176,6 +214,9 @@ POSITION_POOL_MIN_SNAP_SHARE: dict[str, float] = {"QB": 0.25, "RB": 0.10, "WR": 
 # tier of movement: it can nudge a player, never leapfrog him several tiers on its own.
 CAMP_BUZZ_MULTIPLIERS: dict[int, float] = {-2: 0.92, -1: 0.96, 0: 1.00, 1: 1.04, 2: 1.08}
 CAMP_BUZZ_MAX_ABS_EFFECT = 0.08
+# Limited-sample players (thin NFL history): keep only this fraction of the camp deviation
+# from 1.0 so a +2 camp note cannot fully leapfrog a 1-season résumé past the market.
+CAMP_BUZZ_LIMITED_SAMPLE_SHRINK = 0.40
 # camp_buzz.json older than this many days is reported as stale in the run summary.
 CAMP_BUZZ_STALE_AFTER_DAYS = 7
 
@@ -265,8 +306,47 @@ SOFT_TISSUE_WEIGHT = 1.5
 TRAUMA_WEIGHT = 1.0
 UNKNOWN_INJURY_WEIGHT = 1.15
 
+# Small-sample correction: shrink the observed miss rate toward a league-health prior so
+# one injury-hit season on a 1-2 year résumé cannot fully lock High. Bayesian form:
+#   score = (n / (n + k)) * observed + (k / (n + k)) * prior
+INJURY_RISK_PRIOR = 0.08
+INJURY_RISK_PRIOR_STRENGTH = 3  # pseudo-seasons of average health (k)
+# Until this many seasons of history, bucket is capped (High requires a longer record).
+INJURY_RISK_MIN_SEASONS_FOR_HIGH = 3
+INJURY_RISK_BUCKET_CAP_BEFORE_HIGH = "Med"
+# Severity multipliers (soft tissue / unknown) only apply once history is long enough;
+# on short samples they amplify noise.
+INJURY_RISK_MIN_SEASONS_FOR_SEVERITY = 3
+
 # Floor so a heavily discounted player never reaches zero or negative games.
 MIN_EXPECTED_GAMES = 1.0
+
+
+# ======================================================================================
+# STEP 4c -- Draft-scarcity VORP adjustment (1QB / wait-on-TE philosophy)
+# ======================================================================================
+# Raw VORP answers "how many points above replacement?". Draft rank also needs "when should I
+# spend a pick?". In a 1QB league you can wait on QB; TE has a long usable tail. Without a
+# scarcity discount, mid-QB / mid-TE VORP crowds out WR2-4 and RB2-4 in rounds 3-7.
+#
+# Draft-adjusted VORP = min(raw VORP, optional ceiling) - wait penalty.
+# Ceilings are non-increasing in position rank; penalties are non-decreasing — so WITHIN a
+# position the order is unchanged (trimming / position ranks stay coherent). RB/WR untouched.
+#
+# Tuned for pick-3 snake philosophy:
+#   - elite TE ≈ round-3 value (not a round-1/2 reach)
+#   - elite QB ≈ round-4 value (Allen falling to you)
+#   - mid TE (Kraft tier) ≈ rounds 6-7
+#   - streamer / mid QB (Purdy/Herbert/Stafford/TLaw) ≈ double-digit rounds
+# Format: ((max_position_rank_inclusive, value), ...)
+VORP_DRAFT_VORP_CEILINGS: dict[str, tuple[tuple[int, float], ...]] = {
+    "QB": ((1, 36.0),),
+    "TE": ((2, 64.0),),
+}
+VORP_DRAFT_WAIT_PENALTIES: dict[str, tuple[tuple[int, float], ...]] = {
+    "QB": ((1, 0.0), (99, 55.0)),
+    "TE": ((2, 0.0), (8, 8.0), (99, 15.0)),
+}
 
 
 # ======================================================================================

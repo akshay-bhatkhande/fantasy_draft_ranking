@@ -4,10 +4,9 @@ Everything in this file describes *your league*. Change values here and the whol
 pipeline recalculates -- notably STEP 4a's starter counts and replacement levels are
 DERIVED from the roster settings below, never hardcoded.
 
-Roster-size note: the source spec said "16 total roster spots" but the slot list it gave
-sums to 17 (1 QB + 2 RB + 2 WR + 1 TE + 2 FLEX + 1 K + 1 DEF + 7 bench). Confirmed with
-the league owner that 17 is correct and the "16" was a typo. Bench count never enters the
-STEP 4a starter-count math either way.
+Authoritative roster (confirmed): 1 QB + 2 RB + 2 WR + 1 TE + 2 FLEX + 1 K + 1 DST + 8 bench
+= 18 spots. Bench never enters the STEP 4a starter-count / VORP math -- it only changes
+total draft length (180 picks) and how many rounds the Pick-slot strategy tabs cover.
 """
 
 from __future__ import annotations
@@ -84,6 +83,43 @@ NUM_TEAMS = 10
 DRAFT_TYPE = "snake"
 LEAGUE_FORMAT = "redraft"
 
+# Your snake-draft slot (1-indexed). Only this Pick tab is written to the workbook.
+MY_DRAFT_SLOT = 3
+
+# Round-1 board states at YOUR pick. Each becomes its own Excel tab: the named players are
+# treated as already drafted when picks 1-2 are over, and the tab answers "who do I take at
+# pick 3, and how do I draft after that?" Sheet names must stay <= 31 characters (Excel limit).
+ROUND1_SCENARIOS: tuple[dict, ...] = (
+    {
+        "id": "bijan_gibbs_gone",
+        "sheet_name": "If Bijan+Gibbs Gone",
+        "title": "Pick 3 — Bijan & Gibbs already drafted",
+        "gone": ("Bijan Robinson", "Jahmyr Gibbs"),
+        "blurb": (
+            "Picks 1-2 took the two elite RBs. The board opens for WR (or a third path if the "
+            "market also sniped a receiver)."
+        ),
+    },
+    {
+        "id": "gibbs_puka_gone",
+        "sheet_name": "If Gibbs+Puka Gone",
+        "title": "Pick 3 — Gibbs & Puka already drafted",
+        "gone": ("Jahmyr Gibbs", "Puka Nacua"),
+        "blurb": (
+            "One elite RB and the model's WR1 are gone. Decide between Bijan and the next WR tier."
+        ),
+    },
+    {
+        "id": "puka_bijan_gone",
+        "sheet_name": "If Puka+Bijan Gone",
+        "title": "Pick 3 — Puka & Bijan already drafted",
+        "gone": ("Puka Nacua", "Bijan Robinson"),
+        "blurb": (
+            "The model's top WR and top RB are gone. Gibbs vs Chase/St. Brown is the live decision."
+        ),
+    },
+)
+
 # Dedicated (position-locked) starter slots per team. Feeds STEP 4a.
 DEDICATED_STARTERS = {"QB": 1, "RB": 2, "WR": 2, "TE": 1, "K": 1, "DST": 1}
 
@@ -124,13 +160,13 @@ FLEX_ELIGIBLE = ("RB", "WR", "TE")
 # more than 2.5% to buy an 11th starter.
 FLEX_ALLOCATION = {"RB": 0.25, "WR": 0.73, "TE": 0.02}
 
-BENCH_SLOTS = 7
+BENCH_SLOTS = 8
 
 # Positions that go through the full STEP 1-4 VORP pipeline.
 SCORED_POSITIONS = ("QB", "RB", "WR", "TE")
 
-# How many players to actually put on the board. Only 170 picks happen in this league
-# (10 teams x 17 spots), so a 900-row sheet is mostly noise -- hundreds of those players share
+# How many players to actually put on the board. Only 180 picks happen in this league
+# (10 teams x 18 spots), so a 900-row sheet is mostly noise -- hundreds of those players share
 # an identical fallback projection and will never be drafted.
 #
 # This truncates the OUTPUT only. Every statistical input is still computed from the full player
@@ -144,18 +180,30 @@ MINIMAL_POSITIONS = ("K", "DST")
 
 
 # --------------------------------------------------------------------------------------
-# Personal-preference team penalty -- DISABLED
+# Personal-preference penalties (NOT data-driven)
 # --------------------------------------------------------------------------------------
-# Currently off: no team is penalised, and the rankings are purely data-driven.
+# Kept deliberately separate from every data-driven multiplier. When either is active the
+# workbook shows Pre-Penalty VORP / rank so the unbiased model stays visible, and the
+# pipeline runs a second unbiased pass.
 #
-# The mechanism is still here because it is a general team-bias switch, not a 49ers-specific
-# hack. To turn it back on, set BIAS_TEAM to a team abbreviation (e.g. "SF"). When it is
-# active the penalty is applied as a flat multiplier kept deliberately separate from every
-# data-driven multiplier, the workbook gains 49ers/pre-penalty columns, and the pipeline runs
-# a second unbiased pass so the model's unbiased opinion stays visible. While it is None,
-# that second pass is skipped and those columns are omitted entirely.
+# Team penalty: set BIAS_TEAM to a team abbreviation (e.g. "SF") to deprioritize a whole
+# roster. Currently off.
 BIAS_TEAM: str | None = None
 BIAS_TEAM_MULTIPLIER = 0.92
+
+# Player fades: map display name -> multiplier + reason. Matched via normalize_name.
+# 0.90 ≈ an 10% PPG haircut -- enough to drop CMC a tier without inventing a season-ending
+# absence. Add/remove names here; empty dict disables the feature.
+PLAYER_FADES: dict[str, dict] = {
+    "Christian McCaffrey": {
+        "multiplier": 0.90,
+        "reason": "Personal fade: chronic injury / workload history",
+    },
+    "Kyren Williams": {
+        "multiplier": 0.82,
+        "reason": "Personal fade: Corum committee trend / not a true bellcow — align closer to market (ADP ~32, ECR ~42)",
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -165,6 +213,8 @@ class LeagueConfig:
     num_teams: int = NUM_TEAMS
     draft_type: str = DRAFT_TYPE
     league_format: str = LEAGUE_FORMAT
+    my_draft_slot: int = MY_DRAFT_SLOT
+    round1_scenarios: tuple[dict, ...] = ROUND1_SCENARIOS
     dedicated_starters: dict[str, int] = field(default_factory=lambda: dict(DEDICATED_STARTERS))
     flex_slots: int = FLEX_SLOTS
     flex_eligible: tuple[str, ...] = FLEX_ELIGIBLE
@@ -178,10 +228,16 @@ class LeagueConfig:
     output_player_limit: int | None = OUTPUT_PLAYER_LIMIT
     bias_team: str | None = BIAS_TEAM
     bias_team_multiplier: float = BIAS_TEAM_MULTIPLIER
+    player_fades: dict[str, dict] = field(default_factory=lambda: dict(PLAYER_FADES))
+
+    @property
+    def personal_bias_active(self) -> bool:
+        """True when any personal-preference penalty (team or player fade) is configured."""
+        return bool(self.bias_team) or bool(self.player_fades)
 
     @property
     def total_roster_spots(self) -> int:
-        """17 for this league -- see the roster-size note at the top of this module."""
+        """18 for this league -- see the roster-size note at the top of this module."""
         return sum(self.dedicated_starters.values()) + self.flex_slots + self.bench_slots
 
     @property
@@ -195,6 +251,24 @@ class LeagueConfig:
         for pos in self.flex_allocation:
             if pos not in self.flex_eligible:
                 raise ValueError(f"FLEX_ALLOCATION has {pos}, not in FLEX_ELIGIBLE {self.flex_eligible}")
+        if not (1 <= self.my_draft_slot <= self.num_teams):
+            raise ValueError(
+                f"MY_DRAFT_SLOT must be in 1..{self.num_teams}, got {self.my_draft_slot}"
+            )
+        for sc in self.round1_scenarios:
+            name = sc.get("sheet_name", "")
+            if not name or len(name) > 31:
+                raise ValueError(
+                    f"ROUND1_SCENARIOS sheet_name must be 1..31 chars (Excel limit), got {name!r}"
+                )
+            if not sc.get("gone"):
+                raise ValueError(f"ROUND1_SCENARIOS entry {name!r} needs a non-empty 'gone' list")
+        for player, spec in self.player_fades.items():
+            mult = float(spec.get("multiplier", 1.0))
+            if not (0.5 <= mult <= 1.0):
+                raise ValueError(
+                    f"PLAYER_FADES[{player!r}] multiplier must be in [0.5, 1.0], got {mult}"
+                )
 
 
 LEAGUE = LeagueConfig()

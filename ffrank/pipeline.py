@@ -31,6 +31,7 @@ from .features import kdst, risk, volatility
 from .features.efficiency import compute_efficiency_score
 from .features import opportunity as opportunity_mod
 from .features.opportunity import PBP_COLUMNS, compute_opportunity_score
+from .features.rb_role import compute_rb_roles
 from .features.situational import compute_situational
 from .features.weighted_ppg import compute_weighted_ppg, limited_sample_note, season_ppg_table
 from .scoring import step5_ecr
@@ -63,6 +64,8 @@ class PipelineResult:
     # True when a personal-preference team penalty was applied. Drives whether the workbook
     # shows the penalty / pre-penalty columns at all.
     bias_active: bool = False
+    # Objective board ranked by raw VORP (no personal fades / draft-scarcity rank key).
+    raw_vorp_rankings: pd.DataFrame | None = None
 
 
 def _compute_ages(rosters: pd.DataFrame, season: int) -> pd.DataFrame:
@@ -149,31 +152,49 @@ def build_rankings(league: LeagueConfig = LEAGUE, log: SourceLog | None = None) 
     df["limited_sample"] = df["limited_sample"].astype("object").where(df["weighted_ppg"].notna(), True)
     df["limited_sample"] = df["limited_sample"].fillna(True).astype(bool)
 
-    # Snap share drives the STEP 3a position pool.
+    # Snap share drives the STEP 3a position pool and RB role estimates.
+    # Average ONLY games the player actually played with meaningful snaps — inactive weeks
+    # are already absent from snap counts, but ramp-up / injury-exit cameos must not dilute
+    # a featured role into a false committee average.
     if not snaps.empty:
-        sn = snaps.copy()
-        sn["offense_pct"] = pd.to_numeric(sn["offense_pct"], errors="coerce")
-        per_season_snap = sn.groupby(["pfr_player_id", "season"], as_index=False)["offense_pct"].mean()
+        from .features.rb_role import player_snap_share_by_season
         from .features.weighted_ppg import recency_weighted_mean
 
-        snap_weighted = recency_weighted_mean(
-            per_season_snap.rename(columns={"pfr_player_id": "player_id"}), ["offense_pct"], target
-        ).rename(columns={"player_id": "pfr_id", "offense_pct": "snap_share"})
-        df = df.merge(snap_weighted, on="pfr_id", how="left")
+        per_season_snap = player_snap_share_by_season(snaps).rename(
+            columns={"offense_pct": "offense_pct"}
+        )
+        if not per_season_snap.empty:
+            snap_weighted = recency_weighted_mean(
+                per_season_snap[["player_id", "season", "offense_pct"]],
+                ["offense_pct"],
+                target,
+            ).rename(columns={"player_id": "pfr_id", "offense_pct": "snap_share"})
+            df = df.merge(snap_weighted, on="pfr_id", how="left")
     if "snap_share" not in df.columns:
         df["snap_share"] = np.nan
 
     # ---------------------------------------------------------------- STEP 2 inputs
     opportunity = compute_opportunity_score(pbp, weekly, positions, target)
-    df = df.merge(
-        opportunity[["player_id", "opportunity_value", "opportunity_detail"]], on="player_id", how="left"
-    )
+    opp_cols = [
+        c for c in (
+            "player_id", "opportunity_value", "opportunity_detail",
+            "carry_share", "rz_carry_share", "target_share", "air_yards_share",
+            "rz_target_share", "dropback_share", "designed_rush_share", "rz_pass_attempt_share",
+        ) if c in opportunity.columns
+    ]
+    df = df.merge(opportunity[opp_cols], on="player_id", how="left")
     df = df.rename(columns={"opportunity_value": "opportunity_value_historical"})
 
     efficiency = compute_efficiency_score(
         weekly, pbp, participation, snaps, adv_rush, adv_rec, ff_opp, positions, pfr_ids, target
     )
-    eff_cols = [c for c in ("player_id", "efficiency_value", "efficiency_detail", "routes_source", "total_routes") if c in efficiency.columns]
+    eff_cols = [
+        c for c in (
+            "player_id", "efficiency_value", "efficiency_detail", "routes_source", "total_routes",
+            "yprr", "yards_after_contact", "broken_tackle_rate", "td_rate_vs_expected",
+            "ypa", "sack_rate_avoided",
+        ) if c in efficiency.columns
+    ]
     df = df.merge(efficiency[eff_cols], on="player_id", how="left")
 
     sit = compute_situational(
@@ -289,6 +310,9 @@ def build_rankings(league: LeagueConfig = LEAGUE, log: SourceLog | None = None) 
         df["camp_buzz_date"] = ""
         df["camp_buzz_note"] = f"camp_buzz.json {camp.status}; treated as neutral"
 
+    # RB committee / expected snap % (informational only — does not feed VORP).
+    df = compute_rb_roles(df, snaps, target)
+
     # Injury risk and known absences -> STEP 3c.
     injury_hist = risk.compute_injury_history(weekly, injuries, schedules_hist, target)
     df = df.merge(injury_hist, on="player_id", how="left")
@@ -313,9 +337,9 @@ def build_rankings(league: LeagueConfig = LEAGUE, log: SourceLog | None = None) 
 
     # ---------------------------------------------------------------- STEP 3 and STEP 4
     # A second, unbiased pass only exists to expose what the model would say without the
-    # personal-preference team penalty. With no penalised team configured the two passes are
-    # identical by construction, so it is skipped rather than computed and thrown away.
-    bias_active = bool(league.bias_team)
+    # personal-preference penalties (team and/or player fades). With none configured the two
+    # passes are identical by construction, so it is skipped rather than computed and thrown away.
+    bias_active = league.personal_bias_active
 
     scored = run_step3(df, age_curves, contract_lifts, rookie_baselines, league, apply_team_bias=True)
     scored = compute_vorp(scored, league)
@@ -376,6 +400,51 @@ def build_rankings(league: LeagueConfig = LEAGUE, log: SourceLog | None = None) 
 
     ranked["notes"] = _build_notes(ranked, camp)
 
+    # ---------------------------------------------------------------- Raw-VORP board (separate workbook)
+    # Objective projection value only: no personal fades, ranked by points-over-replacement
+    # (vorp_raw), not the draft-scarcity-adjusted vorp used on Main Rankings.
+    raw_base = unbiased if bias_active else scored
+    raw_ranked = raw_base.sort_values("vorp_raw", ascending=False).reset_index(drop=True)
+    if limit is not None and len(raw_ranked) > limit:
+        raw_ranked = raw_ranked.head(limit).copy()
+    else:
+        raw_ranked = raw_ranked.copy()
+    raw_ranked["overall_rank"] = np.arange(1, len(raw_ranked) + 1)
+    raw_ranked["position_rank"] = (
+        raw_ranked.groupby("position")["vorp_raw"]
+        .rank(ascending=False, method="first")
+        .astype(int)
+    )
+    raw_ranked["tier"] = assign_tiers(raw_ranked, value_col="vorp_raw")
+    raw_ranked["position_tier"] = positional_tiers(raw_ranked, value_col="vorp_raw")
+    raw_ranked = raw_ranked.merge(dist[vol_cols], on="player_id", how="left")
+    raw_ranked["same_ppg_volatility_flag"] = volatility.same_ppg_volatility_flags(raw_ranked)
+    raw_ranked["camp_buzz_flag"] = [
+        camp_flag(r.camp_buzz_score, r.overall_rank, r.adp_blended, league.num_teams)
+        for r in raw_ranked.itertuples()
+    ]
+    raw_ranked = step5_ecr.run_step5(raw_ranked, ecr if not ecr.empty else ecr)
+    raw_ranked["market_disagreement_flag"] = np.where(
+        pd.to_numeric(raw_ranked["adp_stdev"], errors="coerce") >= W.ADP_DISAGREEMENT_STDEV_THRESHOLD,
+        "High ADP variance",
+        "",
+    )
+    # Percent display helpers for the raw workbook (leave shares intact too).
+    for share_col, pct_col in (
+        ("snap_share", "snap_share_pct"),
+        ("carry_share", "carry_share_pct_raw"),
+        ("rz_carry_share", "rz_carry_share_pct"),
+        ("target_share", "target_share_pct"),
+        ("air_yards_share", "air_yards_share_pct"),
+        ("rz_target_share", "rz_target_share_pct"),
+        ("dropback_share", "dropback_share_pct"),
+        ("designed_rush_share", "designed_rush_share_pct"),
+        ("rz_pass_attempt_share", "rz_pass_attempt_share_pct"),
+    ):
+        if share_col in raw_ranked.columns:
+            raw_ranked[pct_col] = pd.to_numeric(raw_ranked[share_col], errors="coerce") * 100.0
+    raw_ranked["notes"] = _build_notes(raw_ranked, camp)
+
     # ---------------------------------------------------------------- K / DST (minimal)
     roster_teams = rosters_target.dropna(subset=["gsis_id"]).set_index("gsis_id")["team"]
     kickers = kdst.rank_kickers(weekly, target, roster_teams=roster_teams)
@@ -385,6 +454,7 @@ def build_rankings(league: LeagueConfig = LEAGUE, log: SourceLog | None = None) 
 
     return PipelineResult(
         rankings=ranked,
+        raw_vorp_rankings=raw_ranked,
         kickers=kickers,
         defenses=defenses,
         age_curves=age_curves,
@@ -445,6 +515,7 @@ def _build_notes(df: pd.DataFrame, camp) -> pd.Series:
         if getattr(row, "is_rookie", False):
             bits.append(_txt(getattr(row, "rookie_note", "")))
         bits.append(_txt(getattr(row, "composite_note", "")))
+        bits.append(_txt(getattr(row, "rb_committee_note", "")))
         bits.append(_txt(getattr(row, "injury_history_note", "")))
         known = getattr(row, "known_games_missed", 0) or 0
         if known and float(known) > 0:
@@ -456,8 +527,11 @@ def _build_notes(df: pd.DataFrame, camp) -> pd.Series:
             )
         camp_score = getattr(row, "camp_buzz_score", 0) or 0
         if not pd.isna(camp_score) and float(camp_score) != 0:
+            lim = bool(getattr(row, "limited_sample", False))
+            damp = " (limited-sample dampened)" if lim else ""
             bits.append(
-                f"Camp buzz {float(camp_score):+.0f} -> x{getattr(row, 'camp_buzz_multiplier', 1.0):.2f} "
+                f"Camp buzz {float(camp_score):+.0f} -> x{getattr(row, 'camp_buzz_multiplier', 1.0):.2f}"
+                f"{damp} "
                 f"(source: {_txt(getattr(row, 'camp_buzz_source', ''))}, {_txt(getattr(row, 'camp_buzz_date', ''))})"
             )
         if getattr(row, "contract_year", False):
@@ -467,6 +541,12 @@ def _build_notes(df: pd.DataFrame, camp) -> pd.Series:
             bits.append(
                 f"Personal-preference team penalty applied (x{getattr(row, 'team_bias_multiplier', 1.0):.2f}, "
                 "not objective analysis); see pre-penalty VORP and rank columns"
+            )
+        if str(getattr(row, "player_fade_flag", "N")) == "Y":
+            reason = _txt(getattr(row, "player_fade_reason", "")) or "Personal fade"
+            bits.append(
+                f"{reason} (x{getattr(row, 'player_fade_multiplier', 1.0):.2f}, not objective analysis); "
+                "see pre-penalty VORP and rank columns"
             )
         bits.append(_txt(getattr(row, "coach_change_note", "")))
         bits.append(_txt(getattr(row, "same_ppg_volatility_flag", "")))

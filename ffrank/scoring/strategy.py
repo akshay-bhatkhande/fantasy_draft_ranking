@@ -1,13 +1,14 @@
-"""Per-draft-slot strategy engine for the 10 slot tabs.
+"""Per-draft-slot strategy engine.
 
-Each slot tab shows the SAME VORP and Final Projected Season Points as Main Rankings -- these
-are never recomputed per slot. What changes per slot is:
+The Pick tab shows the SAME VORP and Final Projected Season Points as Main Rankings -- these
+are never recomputed per slot. What changes is:
 
   * the slot's actual snake pick sequence
   * a recommended strategy with reasoning tied to which tiers are realistically available
   * a "likely available at your next pick" indicator derived from ADP versus that sequence
   * a Slot-Adjusted Tier, labelled distinctly so it is never confused with the global Tier
   * per-round "if this tier is gone, pivot to X" contingency notes for the first rounds
+  * Round-1 scenario boards that force named players off the board (already drafted)
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import numpy as np
 import pandas as pd
 
 from config.league import LeagueConfig
+from ..data.sleeper import normalize_name
 
 CONTINGENCY_ROUNDS = 5
 
@@ -202,24 +204,46 @@ def slot_board(
     slot: int,
     league: LeagueConfig,
     rounds: int | None = None,
+    gone_names: tuple[str, ...] | list[str] | None = None,
 ) -> pd.DataFrame:
     """Build the per-slot board: same VORP, plus availability and a Slot-Adjusted Tier.
 
     Deliberately does NOT recompute VORP or Final Projected Season Points -- it re-sorts and
     annotates the shared numbers from Main Rankings.
+
+    Args:
+        gone_names: players already drafted before your first pick (Round-1 scenario). They are
+            flagged and treated as unavailable for recommendations / slot tiers.
     """
     rounds = rounds or league.total_roster_spots
     picks = pick_sequence(slot, league.num_teams, rounds)
     out = df.copy()
 
+    gone_keys = {normalize_name(n) for n in (gone_names or ())}
+    if "name_key" in out.columns:
+        out["scenario_gone"] = out["name_key"].isin(gone_keys)
+    else:
+        out["scenario_gone"] = out["player_name"].map(normalize_name).isin(gone_keys)
+
     out["your_next_pick"] = picks[0]
     # For each player, the earliest of this slot's picks at which he is a realistic target.
-    probs_first = [availability_probability(r.adp_blended, r.adp_stdev, picks[0]) for r in out.itertuples()]
+    probs_first = []
+    for r in out.itertuples():
+        if bool(getattr(r, "scenario_gone", False)):
+            probs_first.append(0.0)
+        else:
+            probs_first.append(availability_probability(r.adp_blended, r.adp_stdev, picks[0]))
     out["prob_available_at_first_pick"] = probs_first
 
     next_pick_for_player = []
     prob_at_next = []
+    labels = []
     for r in out.itertuples():
+        if bool(getattr(r, "scenario_gone", False)):
+            next_pick_for_player.append(pd.NA)
+            prob_at_next.append(0.0)
+            labels.append("Already drafted (scenario)")
+            continue
         chosen, chosen_prob = picks[-1], 0.0
         for pick in picks:
             p = availability_probability(r.adp_blended, r.adp_stdev, pick)
@@ -229,13 +253,14 @@ def slot_board(
             chosen, chosen_prob = pick, p
         next_pick_for_player.append(chosen)
         prob_at_next.append(chosen_prob)
+        labels.append(availability_label(chosen_prob))
     out["realistic_target_pick"] = next_pick_for_player
-    out["likely_available_at_next_pick"] = [availability_label(p) for p in prob_at_next]
+    out["likely_available_at_next_pick"] = labels
     out["availability_probability"] = np.round(prob_at_next, 2)
 
     # Slot-Adjusted Tier: tiers recomputed over only the players realistically reachable from
     # this slot, so tier 1 on a slot tab means "the best group you can actually get".
-    reachable = out[out["prob_available_at_first_pick"] >= 0.15]
+    reachable = out[(out["prob_available_at_first_pick"] >= 0.15) & (~out["scenario_gone"])]
     from .step4_vorp import assign_tiers
 
     slot_tier = pd.Series(pd.NA, index=out.index, dtype="Int64")
@@ -243,7 +268,7 @@ def slot_board(
         slot_tier.loc[reachable.index] = assign_tiers(reachable, value_col="vorp")
     out["slot_adjusted_tier"] = slot_tier
 
-    return out.sort_values("vorp", ascending=False)
+    return out.sort_values(["scenario_gone", "vorp"], ascending=[True, False])
 
 
 def contingency_notes(
@@ -251,11 +276,19 @@ def contingency_notes(
     slot: int,
     league: LeagueConfig,
     rounds: int | None = None,
+    gone_names: tuple[str, ...] | list[str] | None = None,
 ) -> list[dict]:
     """Per-round "if this tier is gone, pivot to X" notes for the first few rounds."""
     rounds = rounds or league.total_roster_spots
     picks = pick_sequence(slot, league.num_teams, rounds)
-    scarcity = positional_scarcity(df, picks, league)
+    gone_keys = {normalize_name(n) for n in (gone_names or ())}
+    live = df.copy()
+    if gone_keys:
+        if "name_key" in live.columns:
+            live = live[~live["name_key"].isin(gone_keys)]
+        else:
+            live = live[~live["player_name"].map(normalize_name).isin(gone_keys)]
+    scarcity = positional_scarcity(live, picks, league)
     notes = []
 
     for round_idx, pick in enumerate(picks[:CONTINGENCY_ROUNDS], start=1):
@@ -270,14 +303,14 @@ def contingency_notes(
         primary, primary_vorp = ranked[0]
         backup, backup_vorp = ranked[1] if len(ranked) > 1 else ("BPA", float("nan"))
 
-        target_pool = df[(df["position"] == primary) & df["vorp"].notna()].nlargest(24, "vorp")
+        target_pool = live[(live["position"] == primary) & live["vorp"].notna()].nlargest(24, "vorp")
         likely = [
             r for r in target_pool.itertuples()
             if availability_probability(r.adp_blended, r.adp_stdev, pick) >= 0.5
         ]
         names = ", ".join(str(getattr(r, "player_name", "")) for r in likely[:3]) or "next tier down"
 
-        backup_pool = df[(df["position"] == backup) & df["vorp"].notna()].nlargest(24, "vorp")
+        backup_pool = live[(live["position"] == backup) & live["vorp"].notna()].nlargest(24, "vorp")
         backup_names = ", ".join(
             str(getattr(r, "player_name", ""))
             for r in backup_pool.itertuples()
@@ -300,3 +333,84 @@ def contingency_notes(
             }
         )
     return notes
+
+
+def scenario_pick3_plan(
+    df: pd.DataFrame,
+    league: LeagueConfig,
+    gone_names: tuple[str, ...] | list[str],
+    top_n: int = 5,
+) -> dict:
+    """What to do at pick 3 (and the early follow-ups) given named players already drafted."""
+    slot = league.my_draft_slot
+    picks = pick_sequence(slot, league.num_teams, league.total_roster_spots)
+    gone_keys = {normalize_name(n) for n in gone_names}
+    live = df.copy()
+    if "name_key" in live.columns:
+        mask = ~live["name_key"].isin(gone_keys)
+    else:
+        mask = ~live["player_name"].map(normalize_name).isin(gone_keys)
+    live = live.loc[mask].sort_values("vorp", ascending=False)
+
+    strategy, reasoning = recommend_strategy(live, slot, picks, league)
+    notes = contingency_notes(df, slot, league, gone_names=gone_names)
+
+    def _top_at(pick: int, n: int = top_n) -> list[dict]:
+        rows = []
+        for r in live.itertuples():
+            if availability_probability(r.adp_blended, r.adp_stdev, pick) < 0.35 and pick == picks[0]:
+                # At pick 3 almost everyone elite is "available" by ADP; still rank by VORP.
+                pass
+            rows.append(
+                {
+                    "name": str(r.player_name),
+                    "position": str(r.position),
+                    "team": str(getattr(r, "team", "") or ""),
+                    "vorp": float(r.vorp) if pd.notna(r.vorp) else float("nan"),
+                    "adp": float(r.adp_blended) if pd.notna(getattr(r, "adp_blended", np.nan)) else float("nan"),
+                    "prob": availability_probability(r.adp_blended, r.adp_stdev, pick),
+                }
+            )
+            if len(rows) >= n:
+                break
+        # For later picks, prefer players still likely available.
+        if pick != picks[0]:
+            ranked = sorted(
+                (
+                    {
+                        "name": str(r.player_name),
+                        "position": str(r.position),
+                        "team": str(getattr(r, "team", "") or ""),
+                        "vorp": float(r.vorp) if pd.notna(r.vorp) else float("nan"),
+                        "adp": float(r.adp_blended) if pd.notna(getattr(r, "adp_blended", np.nan)) else float("nan"),
+                        "prob": availability_probability(r.adp_blended, r.adp_stdev, pick),
+                    }
+                    for r in live.itertuples()
+                ),
+                key=lambda d: (d["prob"] < 0.45, -d["vorp"] if not np.isnan(d["vorp"]) else 0),
+            )
+            rows = [d for d in ranked if d["prob"] >= 0.35][:n] or ranked[:n]
+        return rows
+
+    best = live.iloc[0] if not live.empty else None
+    pick3_targets = _top_at(picks[0], top_n)
+    return {
+        "picks": picks,
+        "strategy": strategy,
+        "reasoning": reasoning,
+        "notes": notes,
+        "best_pick3": None
+        if best is None
+        else {
+            "name": str(best["player_name"]),
+            "position": str(best["position"]),
+            "vorp": float(best["vorp"]),
+            "team": str(best.get("team", "") or ""),
+        },
+        "targets_by_pick": {
+            picks[0]: pick3_targets,
+            picks[1]: _top_at(picks[1], top_n) if len(picks) > 1 else [],
+            picks[2]: _top_at(picks[2], top_n) if len(picks) > 2 else [],
+        },
+        "gone": list(gone_names),
+    }

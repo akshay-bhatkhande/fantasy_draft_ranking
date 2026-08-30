@@ -48,6 +48,11 @@ def print_summary(result, output_path: Path) -> None:
             f"distributions still computed on all {d['full_pool_size']})"
         )
     print(f"  Players ranked          : {d['players_ranked']} across {', '.join(LEAGUE.scored_positions)}{pool_note}")
+    print(
+        f"  League                  : {LEAGUE.num_teams}-team snake {LEAGUE.league_format}, "
+        f"full PPR, {LEAGUE.total_roster_spots} roster spots "
+        f"({LEAGUE.bench_slots} bench), your slot Pick {LEAGUE.my_draft_slot}"
+    )
     print(f"  ADP matched             : {d['adp_players']} players (Fantasy Football Calculator, "
           f"{LEAGUE.num_teams}-team PPR)")
     print(f"  Consensus (ECR) matched : {d['ecr_matched']} players (sanity check only)")
@@ -94,6 +99,18 @@ def print_summary(result, output_path: Path) -> None:
 
     print()
     print(f"  Workbook written to: {output_path}")
+    raw_path = d.get("raw_vorp_path")
+    if raw_path:
+        print(f"  Raw VORP workbook   : {raw_path}")
+        raw = getattr(result, "raw_vorp_rankings", None)
+        if raw is not None and not raw.empty:
+            print()
+            print("  Top 10 by Raw VORP (no fades / no draft-scarcity rank key):")
+            for i, row in enumerate(raw.head(10).itertuples(), start=1):
+                print(
+                    f"   {i:2}. {row.player_name:22s} {row.position:2s}  "
+                    f"raw {float(row.vorp_raw):6.1f}  adj {float(row.vorp):6.1f}"
+                )
     print("=" * 78)
     print()
 
@@ -125,9 +142,17 @@ def main(argv=None) -> int:
         return 1
 
     if not args.no_excel:
+        from ffrank.excel.raw_vorp import write_raw_vorp_workbook
         from ffrank.excel.workbook import write_workbook
 
         write_workbook(result, output_path)
+        raw_path = output_path.with_name(
+            output_path.name.replace("rankings_", "raw_vorp_", 1)
+            if output_path.name.startswith("rankings_")
+            else f"raw_vorp_{output_path.name}"
+        )
+        write_raw_vorp_workbook(result, raw_path)
+        result.diagnostics["raw_vorp_path"] = str(raw_path)
 
     print_summary(result, output_path if not args.no_excel else Path("(skipped)"))
     return 0

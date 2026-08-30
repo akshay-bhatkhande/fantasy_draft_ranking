@@ -64,6 +64,18 @@ def test_camp_buzz_multiplier_table():
     assert camp_buzz_multiplier(None) == pytest.approx(1.00)
 
 
+def test_camp_buzz_limited_sample_dampens_deviation():
+    """Thin NFL history: keep only a fraction of the camp deviation from 1.0."""
+    full = camp_buzz_multiplier(2, limited_sample=False)
+    limited = camp_buzz_multiplier(2, limited_sample=True)
+    assert full == pytest.approx(1.08)
+    assert limited == pytest.approx(1.0 + (1.08 - 1.0) * W.CAMP_BUZZ_LIMITED_SAMPLE_SHRINK)
+    assert 1.0 < limited < full
+    assert abs(camp_buzz_multiplier(-2, limited_sample=True) - 1.0) < abs(
+        camp_buzz_multiplier(-2, limited_sample=False) - 1.0
+    )
+
+
 def test_expected_games_played_worked_example():
     """STEP 3c: 17 minus no known absence minus 0.2 for a Low-risk bucket."""
     games = expected_games_played(
@@ -259,7 +271,7 @@ def test_starter_counts_are_derived_not_hardcoded():
 
 
 def test_team_penalty_is_disabled_by_default():
-    """No team is penalised, so every player's projection is purely data-driven."""
+    """No team is penalised; CMC fade does not touch synthetic players in this fixture."""
     assert LEAGUE.bias_team is None
 
     df = _player_x_frame()
@@ -273,12 +285,44 @@ def test_team_penalty_is_disabled_by_default():
     out = run_step3(scored, curves, lifts, rookies, LEAGUE, apply_team_bias=True)
     assert (out["team_bias_multiplier"] == 1.00).all()
     assert (out["team_bias_flag"] == "N").all()
+    assert (out["player_fade_multiplier"] == 1.00).all()
+    assert (out["player_fade_flag"] == "N").all()
 
-    # With no penalised team, asking for the biased and unbiased passes must be identical --
-    # which is exactly why the pipeline skips the second pass entirely.
+    # With no matching personal-preference targets in this frame, biased and unbiased passes
+    # are identical -- which is why the pipeline can skip the second pass when nothing applies.
     unbiased = run_step3(scored, curves, lifts, rookies, LEAGUE, apply_team_bias=False)
     pd.testing.assert_series_equal(
         out["final_projected_season_points"], unbiased["final_projected_season_points"]
+    )
+
+
+def test_player_fade_mechanism():
+    """PLAYER_FADES haircuts only the named player and is reversed when bias is off."""
+    league = dataclasses.replace(
+        LEAGUE,
+        player_fades={
+            "Player X": {"multiplier": 0.90, "reason": "test fade"},
+        },
+    )
+    df = _player_x_frame()
+    scored = compute_composite_z(df)
+    scored.loc[scored["player_id"] == "player-x", "composite_z"] = 1.005
+    from ffrank.data.sleeper import normalize_name
+    scored["name_key"] = scored["player_name"].map(normalize_name)
+
+    curves = {"RB": AgeCurve("RB", peak_age=27.0, decline_per_year=0.03, sample_size=500, fitted=True)}
+    lifts = {"RB": ContractYearLift("RB", multiplier=1.05, sample_size=100, derived=True)}
+    rookies = {"RB": RookieBaseline("RB")}
+
+    biased = run_step3(scored, curves, lifts, rookies, league, apply_team_bias=True)
+    unbiased = run_step3(scored, curves, lifts, rookies, league, apply_team_bias=False)
+    bx = biased[biased["player_id"] == "player-x"].iloc[0]
+    ux = unbiased[unbiased["player_id"] == "player-x"].iloc[0]
+    assert bx["player_fade_flag"] == "Y"
+    assert bx["player_fade_multiplier"] == pytest.approx(0.90)
+    assert ux["player_fade_multiplier"] == pytest.approx(1.00)
+    assert bx["final_projected_season_points"] == pytest.approx(
+        ux["final_projected_season_points"] * 0.90, abs=0.1
     )
 
 

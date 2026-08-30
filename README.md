@@ -3,6 +3,9 @@
 Generates pre-draft fantasy football rankings and writes them to an Excel workbook. Built to
 be re-run through the offseason as news changes.
 
+**Your league (locked in `config/league.py`):** 10-team snake, full PPR, redraft.
+Roster 1QB / 2RB / 2WR / 1TE / 2FLEX / 1K / 1DST / **8 bench** (18 spots). **Draft slot 3.**
+
 Everything it uses is free. No paid subscriptions, and no API keys that cost money.
 
 ---
@@ -23,7 +26,12 @@ Output lands at:
 
 ```
 output/rankings_<today's date>.xlsx        e.g. output/rankings_2026-08-06.xlsx
+output/raw_vorp_<today's date>.xlsx        raw VORP board (no fades / no draft-scarcity rank key)
 ```
+
+`rankings_*.xlsx` is the draft board (draft-adjusted VORP + personal fades).
+`raw_vorp_*.xlsx` is the objective production board: ranked by points over replacement only,
+with injury / snap / target / red-zone / efficiency columns for inspection.
 
 Useful flags: `--output path.xlsx` to choose the file, `--no-excel` to run the pipeline and
 print the summary without writing a workbook.
@@ -127,11 +135,10 @@ is yours to make per roster slot.
 Expert consensus (Step 5) is a **sanity check only**. It never feeds the math. Any player more
 than 15 spots away from consensus gets an auto-generated reason naming the input responsible.
 
-**No team penalty is applied.** Every ranking is purely data-driven, with no personal-preference
-adjustment against any team. The mechanism is still available as a general switch -- set
-`BIAS_TEAM` in `config/league.py` to a team abbreviation to turn it on. While it is off, the
-pipeline skips its second unbiased pass and the workbook omits the penalty and pre-penalty
-columns, so there are no dead columns to read past.
+**Personal preferences (kept separate from the model):** no team penalty. **Christian McCaffrey
+is faded** via `PLAYER_FADES` (x0.90 PPG) for injury/workload history — Pre-Penalty VORP/rank
+columns stay on the sheet so you can see the unbiased rank. Edit fades or set `BIAS_TEAM` in
+`config/league.py`.
 
 ---
 
@@ -139,7 +146,7 @@ columns, so there are no dead columns to read past.
 
 | File | What lives there |
 |---|---|
-| `config/league.py` | scoring, teams, roster slots, FLEX allocation, target season, optional team penalty |
+| `config/league.py` | scoring, teams, roster, draft slot, Round-1 scenarios, optional team/player fades |
 | `config/weights.py` | all component weights, multiplier magnitudes, injury buckets, tier method |
 
 Both are plain constants with comments. Nothing in `ffrank/` hardcodes a league rule or a
@@ -149,25 +156,28 @@ weight, so you can retune without touching the scoring logic.
 
 ## Workbook tabs
 
-15 sheets: **Cover**, **Main Rankings**, **Pick 1**-**Pick 10**, **Tiers**, **Bye Week Check**,
-**Kicker-DEF**.
-
-(The original brief said "14 total" and then listed these fifteen. All the listed tabs are
-built, since dropping one to match the count would lose requested content.)
+**Cover**, **Main Rankings**, **Pick 3**, three Round-1 scenario tabs
+(**If Bijan+Gibbs Gone**, **If Gibbs+Puka Gone**, **If Puka+Bijan Gone**), **Overall Tiers**,
+**QB Tiers** / **RB Tiers** / **WR Tiers** / **TE Tiers**, **Bye Week Check**, **Kicker-DEF**.
 
 - **Cover** -- index with hyperlinks, plain-language methodology, Last Updated, plus an audit
   block showing the replacement levels, fitted age curves, derived contract-year lifts and
   rookie baselines actually used this run.
 - **Main Rankings** -- the single source of truth. Every other tab filters or annotates these
   exact numbers. Capped at the top 250 players (`OUTPUT_PLAYER_LIMIT` in `config/league.py`),
-  since only 170 picks happen in this league. The cap is applied *after* Step 4, so replacement
+  since only 180 picks happen in this league. The cap is applied *after* Step 4, so replacement
   levels and the Step 3a position distributions are still computed from the full ~900-player
   population -- trimming earlier would move the replacement player and change every VORP.
-- **Pick 1-10** -- one per draft slot: computed snake pick sequence, recommended strategy with
-  reasoning tied to the VORP obtainable at *your* picks, a "likely available at your next pick"
-  indicator, a clearly-labelled **Slot-Adjusted Tier** (never confused with the global Tier),
+  Rows are **colour-banded by global Tier**.
+- **Pick 3** -- your draft slot only (`MY_DRAFT_SLOT`): computed snake pick sequence,
+  recommended strategy with reasoning tied to the VORP obtainable at *your* picks, a
+  "likely available at your next pick" indicator, a clearly-labelled **Slot-Adjusted Tier**,
   and per-round pivot contingencies. VORP and projected points are never recomputed here.
-- **Tiers** -- global VORP tier bands by position, colour-banded, independent of draft slot.
+- **Round-1 scenario tabs** -- same Pick 3 board with named players forced off (already
+  drafted). Each tab answers "what do I do if picks 1-2 took X and Y?" Configure in
+  `ROUND1_SCENARIOS` in `config/league.py`.
+- **Overall Tiers** -- full board sorted and colour-banded by global VORP tier.
+- **QB / RB / WR / TE Tiers** -- one sheet per position, colour-banded by position tier.
 - **Bye Week Check** -- bye clustering risk among top-ranked players.
 - **Kicker-DEF** -- minimal, recency-weighted PPG only. Draft last or stream.
 
